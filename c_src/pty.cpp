@@ -416,7 +416,6 @@ pty_nonblock(int fd) {
 static void
 pty_pipesocket_fn(void *data) {
   pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(data);
-  printf("[debug] enter pty_pipesocket_fn, pipesocket=%p\r\n", pipesocket);
 
   int fd = pipesocket->fd;
   int activity;
@@ -428,7 +427,6 @@ pty_pipesocket_fn(void *data) {
     activity = select(fd + 1, &readfds, NULL, NULL, NULL);
 
     if ((activity < 0) && (errno != EINTR)) {
-      printf("[debug] select error\r\n");
       continue;
     }
 
@@ -443,7 +441,6 @@ pty_pipesocket_fn(void *data) {
       char buffer[buf_size] = {'\0'};
       bytes_read = read(fd, buffer, buf_size);
       if (bytes_read == 0) {
-        printf("[debug] fd closed\r\n");
         pipesocket->baton->fd_closed = true;
         close(fd);
         kill(pipesocket->baton->pid, SIGHUP);
