@@ -77,6 +77,7 @@
 struct pty_baton {
   ErlNifEnv *env;
   ErlNifPid * process;
+  bool fd_closed;
   int exit_code;
   int signal_code;
   pid_t pid;
@@ -86,8 +87,10 @@ struct pty_baton {
 
 typedef struct pty_pipesocket_ {
   int fd;
-  
-  ErlNifEnv *env;
+
+  pty_baton * baton;
+
+  ErlNifEnv * env;
   ErlNifPid * process;
   
   uv_async_t async;
@@ -151,19 +154,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[8], &is_utf8) &&
       nif::get(env, argv[9], &closeFDs) &&
       nif::get(env, argv[10], helper_path)) {
-
-    // debug
-    // printf("file=%s\r\n", file.c_str());
-    // for (size_t index = 0; index < args.size(); index++) {
-    //   printf("args[%lu]=%s\r\n", index, args[index].c_str());
-    // }
-    // for (size_t index = 0; index < envs.size(); index++) {
-    //   printf("env[%lu]: %s\r\n", index, envs[index].c_str());
-    // }
-    // printf("cwd=%s\r\n", cwd.c_str());
-    // printf("cols=%d, rows=%d\r\n", cols, rows);
-    // printf("uid=%d, gid=%d\r\n", uid, gid);
-    // printf("helperPath=%s\r\n", helper_path.c_str());
 
     int envc = (int)envs.size();
     char **envs_c = new char*[envc+1];
@@ -303,11 +293,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         goto done;
       }
 
-      if (pty_nonblock(master) == -1) {
-        erl_ret = nif::error(env, "Could not set master fd to nonblocking.");
-        goto done;
-      }
-
       pty_pipesocket * pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
       if (pipesocket == NULL) {
         erl_ret = nif::error(env, "Could not allocate memory for resource.");
@@ -338,11 +323,16 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         goto done;
       }
 
-      uv_pipe_init(uv_default_loop(), &pipesocket->handle_, 0);
-      int uv_err = uv_pipe_open(&pipesocket->handle_, master);
-      if (uv_err != 0) {
-        erl_ret = nif::error(env, "uv_pipe_open failed.");
-        // todo: cleanup
+      // uv_pipe_init(uv_default_loop(), &pipesocket->handle_, 0);
+      // int uv_err = uv_pipe_open(&pipesocket->handle_, master);
+      // if (uv_err != 0) {
+      //   erl_ret = nif::error(env, "uv_pipe_open failed.");
+      //   // todo: cleanup
+      //   goto done;
+      // }
+
+      if (pty_nonblock(master) == -1) {
+        erl_ret = nif::error(env, "Could not set master fd to nonblocking.");
         goto done;
       }
 
@@ -353,7 +343,10 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       baton->process = process;
       baton->pid = pid;
       baton->async.data = baton;
+      baton->fd_closed = false;
 
+      pipesocket->baton = baton;
+      pipesocket->async.data = pipesocket;
       uv_mutex_init(&pipesocket->mutex);
       uv_async_init(uv_default_loop(), &pipesocket->async, pty_after_pipesocket);
 
@@ -380,8 +373,8 @@ done:
 
 static ERL_NIF_TERM expty_write(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   ERL_NIF_TERM erl_ret;
-  pty_pipesocket * pipesocket;
-  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket)) {
+  pty_pipesocket * pipesocket = nullptr;
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket) {
     ErlNifBinary erl_bin;
     size_t nbytes = 0;
     if (enif_inspect_binary(env, argv[1], &erl_bin)) {
@@ -423,24 +416,37 @@ pty_nonblock(int fd) {
 static void
 pty_pipesocket_fn(void *data) {
   pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(data);
+  printf("[debug] enter pty_pipesocket_fn, pipesocket=%p\r\n", pipesocket);
 
   int fd = pipesocket->fd;
-  fd_set readfds;
-  FD_ZERO(&readfds);
-  FD_SET(fd, &readfds);
   int activity;
   
-  while (true) {
-    activity = select(fd + 1 , &readfds , NULL , NULL , NULL);
+  while (!pipesocket->baton->fd_closed) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    activity = select(fd + 1, &readfds, NULL, NULL, NULL);
+
     if ((activity < 0) && (errno != EINTR)) {
-      printf("select error\r\n");
+      printf("[debug] select error\r\n");
+      continue;
     }
+
+    // if (activity == 0) {
+    //   continue;
+    // }
+    // printf("[debug] select activity:=%d\r\n", activity);
 
     if (FD_ISSET(fd, &readfds)) {
       size_t bytes_read = 0;
-      char buffer[1024] = {'\0'};
-      bytes_read = read(fd, buffer, 1024);
+      const size_t buf_size = 1024;
+      char buffer[buf_size] = {'\0'};
+      bytes_read = read(fd, buffer, buf_size);
       if (bytes_read == 0) {
+        printf("[debug] fd closed\r\n");
+        pipesocket->baton->fd_closed = true;
+        close(fd);
+        kill(pipesocket->baton->pid, SIGHUP);
         break;
       }
 
@@ -458,17 +464,27 @@ pty_pipesocket_fn(void *data) {
       } 
     }
   }
+
+  uv_async_send(&pipesocket->async);
 }
 
 size_t pty_pipesocket::write(void * data, size_t len) {
+  if (this->baton->fd_closed) {
+    return 0;
+  }
+
   uv_mutex_lock(&this->mutex);
   size_t bytes_to_write = len, bytes_written = 0, buffer_size = 1024, nbytes = 0;
   size_t retry = 3;
-  
+
   while (true) {
     nbytes = buffer_size;
     if (buffer_size > bytes_to_write) {
       nbytes = bytes_to_write;
+    }
+
+    if (this->baton->fd_closed) {
+      break;
     }
 
     ssize_t bytes_written_cur = ::write(this->fd, ((void *)(int64_t *)(((size_t)(char *)data) + bytes_written)), nbytes);
@@ -503,17 +519,11 @@ pty_waitpid(void *data) {
 
   errno = 0;
 
+  signal(SIGCHLD, SIG_DFL);
   if ((ret = waitpid(baton->pid, &stat_loc, 0)) != baton->pid) {
     if (ret == -1 && errno == EINTR) {
       return pty_waitpid(baton);
     }
-    // if (ret == -1 && errno == ECHILD) {
-    //   // XXX node v0.8.x seems to have this problem.
-    //   // waitpid is already handled elsewhere.
-    //   ;
-    // } else {
-    //   assert(false);
-    // }
   }
 
   if (WIFEXITED(stat_loc)) {
@@ -523,6 +533,15 @@ pty_waitpid(void *data) {
   if (WIFSIGNALED(stat_loc)) {
     baton->signal_code = WTERMSIG(stat_loc);
   }
+  signal(SIGCHLD, SIG_IGN);
+
+  ErlNifEnv * msg_env = enif_alloc_env();
+  enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env, 
+    nif::atom(msg_env, "exit"),
+    enif_make_int(msg_env, baton->exit_code),
+    enif_make_int(msg_env, baton->signal_code)
+  ));
+  enif_free_env(msg_env);
 
   uv_async_send(&baton->async);
 }
@@ -534,24 +553,11 @@ pty_waitpid(void *data) {
 
 static void
 pty_after_waitpid(uv_async_t *async) {
-  pty_baton *baton = static_cast<pty_baton*>(async->data);
-
-  if (enif_is_process_alive(baton->env, baton->process)) {
-    ErlNifEnv * msg_env = enif_alloc_env();
-    enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env, 
-      nif::atom(msg_env, "exit"),
-      enif_make_int(msg_env, baton->exit_code),
-      enif_make_int(msg_env, baton->signal_code)
-    ));
-    enif_free_env(msg_env);
-  }
-
   uv_close((uv_handle_t *)async, pty_after_close);
 }
 
 static void
 pty_after_pipesocket(uv_async_t *async) {
-  pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(async->data);
   uv_close((uv_handle_t *)async, pty_after_close_pipesocket);
 }
 
