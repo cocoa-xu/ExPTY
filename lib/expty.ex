@@ -4,7 +4,7 @@ defmodule ExPTY do
   """
   use GenServer
 
-  defstruct [:pipesocket, :pid, :pty, :on_data]
+  defstruct [:pipesocket, :pid, :pty, :on_data, :on_exit]
   alias __MODULE__, as: T
 
   @spec default_pty_options() :: Keyword.t()
@@ -19,7 +19,8 @@ defmodule ExPTY do
       handleFlowControl: false,
       flowControlPause: "\x13",
       flowControlResume: "\x11",
-      on_data: nil
+      on_data: nil,
+      on_exit: nil
     ]
   end
 
@@ -47,18 +48,38 @@ defmodule ExPTY do
     GenServer.call(pty, {:write, data})
   end
 
-  def on_data(pty, callback) when is_function(callback, 1) do
-
+  def on_data(pty, callback) when is_function(callback, 3) do
+    GenServer.call(pty, {:update_on_data, {:func, callback}})
   end
 
   def on_data(pty, module) when is_atom(module) do
+    if Kernel.function_exported?(module, :on_data, 3) do
+      GenServer.call(pty, {:update_on_data, {:module, module}})
+    else
+      {:error, "expecting #{module}.on_data/3 to be exist"}
+    end
+  end
+
+  def on_exit(pty, callback) when is_function(callback, 4) do
+    GenServer.call(pty, {:update_on_exit, {:func, callback}})
+  end
+
+  def on_exit(pty, module) when is_atom(module) do
+    if Kernel.function_exported?(module, :onExit, 4) do
+      GenServer.call(pty, {:update_on_exit, {:module, module}})
+    else
+      {:error, "expecting #{module}.on_exit/3 to be exist"}
+    end
+  end
+
+  def flow_control(pty, enable?) when is_boolean(enable?) do
 
   end
 
   # GenServer callbacks
 
   @impl true
-  @spec init({String.t(), [String.t()], Keyword.t()}) :: {:ok, :ok}
+  @spec init({String.t(), [String.t()], Keyword.t()}) :: {:ok, term()}
   def init(init_args) do
     {file, args, pty_options} = init_args
 
@@ -79,11 +100,11 @@ defmodule ExPTY do
 
     on_data = options[:on_data] || nil
     on_data =
-      if Kernel.function_exported?(on_data, :on_data, 3) do
-        {:module, on_data}
+      if is_function(on_data, 3) do
+        {:func, on_data}
       else
-        if is_function(on_data, 3) do
-          {:func, on_data}
+      if is_atom(on_data) and Kernel.function_exported?(on_data, :on_data, 3) do
+        {:module, on_data}
         else
           nil
         end
@@ -114,6 +135,26 @@ defmodule ExPTY do
   end
 
   @impl true
+  def handle_call({:update_on_data, {:func, callback}}, _from, %T{}=state) do
+    {:reply, :ok, %T{state | on_data: {:func, callback}}}
+  end
+
+  @impl true
+  def handle_call({:update_on_data, {:module, module}}, _from, %T{}=state) do
+    {:reply, :ok, %T{state | on_data: {:module, module}}}
+  end
+
+  @impl true
+  def handle_call({:update_on_exit, {:func, callback}}, _from, %T{}=state) do
+    {:reply, :ok, %T{state | on_exit: {:func, callback}}}
+  end
+
+  @impl true
+  def handle_call({:update_on_exit, {:module, module}}, _from, %T{}=state) do
+    {:reply, :ok, %T{state | on_exit: {:module, module}}}
+  end
+
+  @impl true
   def handle_info({:data, data}, %T{on_data: on_data}=state) do
     case on_data do
       {:module, module} ->
@@ -127,17 +168,16 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_info({:exit, exit_code, signal_code}, state) do
-    IO.inspect({:exit, exit_code, signal_code}, label: "onExit")
+  def handle_info({:exit, exit_code, signal_code}, %T{on_exit: on_exit}=state) do
+    case on_exit do
+      {:module, module} ->
+        module.on_exit(__MODULE__, self(), exit_code, signal_code)
+      {:func, func} ->
+        func.(__MODULE__, self(), exit_code, signal_code)
+      _ ->
+        nil
+    end
     {:noreply, state}
-  end
-
-  def onExit(pty, callback) when is_function(callback, 0) do
-
-  end
-
-  def flowControl(pty, enable?) when is_boolean(enable?) do
-
   end
 
   def resize(pty, columns, rows)
