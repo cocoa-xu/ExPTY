@@ -28,7 +28,9 @@ defmodule ExPTY.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.7", runtime: false},
-      {:cc_precompiler, "~> 0.1", runtime: false}
+      {:cc_precompiler, "~> 0.1", runtime: false},
+
+      {:kino, "~> 0.7", optional: true}
     ]
   end
 
@@ -42,15 +44,15 @@ defmodule ExPTY.MixProject do
 
   defp package() do
     [
-      name: "empty",
+      name: "ExPTY",
       files: ~w(
         c_src
+        3rd_party
         lib
         mix.exs
         README*
         LICENSE*
         Makefile
-        checksum.exs
       ),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @github_url}
