@@ -38,7 +38,7 @@ $(LIBUV_A): $(PRIV_DIR)
 		mkdir -p "$(LIBUV_BUILD_DIR)" && \
 		cd "$(LIBUV_BUILD_DIR)" && \
 		cmake "$(LIBUV_SRC)" -D CMAKE_INSTALL_PREFIX="$(PRIV_DIR)" && \
-		cmake --build . && \
+		cmake --build . $(MAKE_BUILD_FLAGS) && \
 		cmake --install . ; \
 	fi
 
