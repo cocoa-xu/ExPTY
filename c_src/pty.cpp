@@ -331,14 +331,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         goto done;
       }
 
-      // uv_pipe_init(uv_default_loop(), &pipesocket->handle_, 0);
-      // int uv_err = uv_pipe_open(&pipesocket->handle_, master);
-      // if (uv_err != 0) {
-      //   erl_ret = nif::error(env, "uv_pipe_open failed.");
-      //   // todo: cleanup
-      //   goto done;
-      // }
-
       if (pty_nonblock(master) == -1) {
         erl_ret = nif::error(env, "Could not set master fd to nonblocking.");
         goto done;
@@ -437,14 +429,21 @@ static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM ar
 static ERL_NIF_TERM expty_pause(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   pty_pipesocket * pipesocket = nullptr;
   if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket) {
-    struct termios term;
-    if (ioctl(pipesocket->fd, PTY_GETATTR, &term) == -1) {
-      return nif::error(env, "ioctl get failed.\n");
+    struct termios settings; 
+
+    if (tcgetattr(pipesocket->fd, &settings) < 0) {
+      return nif::error(env, "tcgetattr failed.\n");
     }
-    term.c_iflag |= IXON | IXOFF;
-    if (ioctl(pipesocket->fd, PTY_SETATTR, &term) == -1) {
-      return nif::error(env, "ioctl set failed.\n");
+
+    settings.c_iflag |= IXON | IXOFF;
+    
+    if (tcsetattr(pipesocket->fd, TCSANOW, &settings) < 0) {
+      return nif::error(env, "tcsetattr failed.\n");
     }
+
+    const char XOFF = 0x13;
+    write(pipesocket->fd, &XOFF, 1);
+
     return nif::atom(env, "ok");
   } else {
     return nif::error(env, "Cannot get pipesocket resource");
@@ -454,14 +453,21 @@ static ERL_NIF_TERM expty_pause(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
 static ERL_NIF_TERM expty_resume(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   pty_pipesocket * pipesocket = nullptr;
   if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket) {
-    struct termios term;
-    if (ioctl(pipesocket->fd, PTY_GETATTR, &term) == -1) {
-      return nif::error(env, "ioctl get failed.\n");
+    struct termios settings; 
+
+    if (tcgetattr(pipesocket->fd, &settings) < 0) {
+      return nif::error(env, "tcgetattr failed.\n");
     }
-    term.c_iflag &= ~(IXON | IXOFF | IXANY);
-    if (ioctl(pipesocket->fd, PTY_SETATTR, &term) == -1) {
-      return nif::error(env, "ioctl set failed.\n");
+
+    settings.c_iflag &= ~(IXON | IXOFF);
+    
+    if (tcsetattr(pipesocket->fd, TCSANOW, &settings) < 0) {
+      return nif::error(env, "tcsetattr failed.\n");
     }
+
+    const char XON = 0x11;
+    write(pipesocket->fd, &XON, 1);
+    
     return nif::atom(env, "ok");
   } else {
     return nif::error(env, "Cannot get pipesocket resource");
