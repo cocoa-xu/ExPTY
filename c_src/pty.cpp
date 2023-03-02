@@ -530,6 +530,7 @@ pty_pipesocket_fn(void *data) {
       if (bytes_read == 0) {
         pipesocket->baton->fd_closed = true;
         close(fd);
+        kill(pipesocket->baton->pid, SIGHUP);
         break;
       }
 
@@ -615,8 +616,6 @@ static void pty_waitpid(void *data) {
   if (WIFSIGNALED(stat_loc)) {
     baton->signal_code = WTERMSIG(stat_loc);
   }
-  // todo: maybe we don't need to reset it to ignore?
-  signal(SIGCHLD, SIG_IGN);
 
   ErlNifEnv * msg_env = enif_alloc_env();
   enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env,
