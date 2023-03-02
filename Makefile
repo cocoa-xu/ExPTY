@@ -11,6 +11,9 @@ CPPFLAGS += -std=c++14 -O3 -Wall -Wextra -Wno-unused-parameter -Wno-missing-fiel
 CPPFLAGS += -I"$(ERTS_INCLUDE_DIR)"
 NIF_CPPFLAGS = $(CPPFLAGS) -I"$(PRIV_DIR)/include" -L"$(PRIV_DIR)/lib" -luv_a
 
+DEFAULT_JOBS ?= 1
+MAKE_BUILD_FLAGS ?= -j$(DEFAULT_JOBS)
+
 UNAME_S := $(shell uname -s)
 ifndef TARGET_ABI
 ifeq ($(UNAME_S),Darwin)

@@ -15,7 +15,11 @@ defmodule ExPTY.MixProject do
       deps: deps(),
       docs: docs(),
       package: package(),
-      compilers: [:elixir_make] ++ Mix.compilers()
+      compilers: [:elixir_make] ++ Mix.compilers(),
+      make_env: %{
+        "MAKE_BUILD_FLAGS" =>
+          System.get_env("MAKE_BUILD_FLAGS", "-j#{System.schedulers_online()}")
+      }
     ]
   end
 
