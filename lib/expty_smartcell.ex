@@ -52,6 +52,14 @@ else
     end
 
     @impl true
+    def terminate(_, ctx) do
+      # signal 9: SIGKILL
+      IO.puts("[debug] ExPTY.SmartCell.terminate/2")
+      ExPTY.kill(ctx.assigns.pty, 9)
+      :ok
+    end
+
+    @impl true
     def to_attrs(_) do
       %{}
     end
