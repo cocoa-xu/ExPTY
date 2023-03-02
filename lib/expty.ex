@@ -300,7 +300,7 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_call({:resize, cols, rows}, _from, %T{pipesocket: pipesocket} = state) do
+  def handle_call({:resize, {cols, rows}}, _from, %T{pipesocket: pipesocket} = state) do
     ret = ExPTY.Nif.resize(pipesocket, cols, rows)
     {:reply, ret, state}
   end

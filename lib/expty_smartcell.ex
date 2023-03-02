@@ -39,6 +39,19 @@ else
     end
 
     @impl true
+    def handle_event("resize", %{"cols" => cols, "rows" => rows}, ctx)
+        when is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
+      ExPTY.resize(ctx.assigns.pty, cols, rows)
+      {:noreply, ctx}
+    end
+
+    @impl true
+    def handle_event(unknown_event, data, ctx) do
+      IO.puts("[debug] unknown event: #{inspect(unknown_event)}, data: #{inspect(data)}")
+      {:noreply, ctx}
+    end
+
+    @impl true
     def to_attrs(_) do
       %{}
     end
