@@ -84,3 +84,6 @@ Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_do
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at <https://hexdocs.pm/expty>.
 
+## Acknowledgements
+
+This project is largely based on [microsoft/node-pty](https://github.com/microsoft/node-pty). Many thanks to all developers and maintainers, without them this wouldn't be possible.
