@@ -396,6 +396,20 @@ static ERL_NIF_TERM expty_write(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   return erl_ret;
 }
 
+static ERL_NIF_TERM expty_kill(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  ERL_NIF_TERM erl_ret;
+  pty_pipesocket * pipesocket = nullptr;
+  int signal = 0;
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket &&
+      nif::get(env, argv[1], &signal) && signal > 0) {
+    kill(pipesocket->baton->pid, signal);
+    erl_ret = nif::atom(env, "ok");
+  } else {
+    erl_ret = nif::error(env, "Cannot get pipesocket resource");
+  }
+  return erl_ret;
+}
+
 static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   pty_pipesocket * pipesocket = nullptr;
   int cols = 0;
@@ -516,7 +530,6 @@ pty_pipesocket_fn(void *data) {
       if (bytes_read == 0) {
         pipesocket->baton->fd_closed = true;
         close(fd);
-        kill(pipesocket->baton->pid, SIGHUP);
         break;
       }
 
@@ -580,8 +593,7 @@ size_t pty_pipesocket::write(void * data, size_t len) {
  * Wait for SIGCHLD to read exit status.
  */
 
-static void
-pty_waitpid(void *data) {
+static void pty_waitpid(void *data) {
   int ret;
   int stat_loc;
 
@@ -603,6 +615,7 @@ pty_waitpid(void *data) {
   if (WIFSIGNALED(stat_loc)) {
     baton->signal_code = WTERMSIG(stat_loc);
   }
+  // todo: maybe we don't need to reset it to ignore?
   signal(SIGCHLD, SIG_IGN);
 
   ErlNifEnv * msg_env = enif_alloc_env();
@@ -612,6 +625,8 @@ pty_waitpid(void *data) {
     enif_make_int(msg_env, baton->signal_code)
   ));
   enif_free_env(msg_env);
+  enif_free(baton->process);
+  baton->process = NULL;
 
   uv_async_send(&baton->async);
 }
@@ -640,7 +655,6 @@ static void
 pty_after_close(uv_handle_t *handle) {
   uv_async_t *async = (uv_async_t *)handle;
   pty_baton *baton = static_cast<pty_baton*>(async->data);
-  enif_free(baton->process);
   delete baton;
 }
 
@@ -649,9 +663,9 @@ pty_after_close_pipesocket(uv_handle_t *handle) {
   uv_async_t *async = (uv_async_t *)handle;
   pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(async->data);
   enif_free(pipesocket->process);
+  pipesocket->process = NULL;
   uv_mutex_destroy(&pipesocket->mutex);
   enif_release_resource((void *)pipesocket);
-  delete pipesocket;
 }
 
 /**
@@ -699,13 +713,9 @@ err:
 #endif
 }
 
-static void destruct(ErlNifEnv *env, void *args) {
-    // pty_pipesocket * res = (pty_pipesocket *)args;
-}
-
 static int on_load(ErlNifEnv * env, void **, ERL_NIF_TERM) {
   ErlNifResourceType *rt;
-  rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", destruct, ERL_NIF_RT_CREATE, NULL);
+  rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", NULL, ERL_NIF_RT_CREATE, NULL);
   if (!rt) return -1;
   pty_pipesocket::type = rt;
   return 0;
@@ -722,6 +732,7 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 static ErlNifFunc nif_functions[] = {
   {"spawn", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"kill", 2, expty_kill, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"pause", 1, expty_pause, ERL_DIRTY_JOB_IO_BOUND},
   {"resume", 1, expty_resume, ERL_DIRTY_JOB_IO_BOUND}

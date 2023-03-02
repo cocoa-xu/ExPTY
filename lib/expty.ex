@@ -62,6 +62,11 @@ defmodule ExPTY do
     GenServer.call(pty, {:write, data})
   end
 
+  @spec kill(pid, integer) :: :ok
+  def kill(pty, signal) when is_integer(signal) do
+    GenServer.call(pty, {:kill, signal})
+  end
+
   def on_data(pty, callback) when is_function(callback, 3) do
     GenServer.call(pty, {:update_on_data, {:func, callback}})
   end
@@ -265,6 +270,12 @@ defmodule ExPTY do
       ret = ExPTY.Nif.write(pipesocket, data)
       {:reply, ret, state}
     end
+  end
+
+  @impl true
+  def handle_call({:kill, signal}, _from, %T{pipesocket: pipesocket} = state) when is_integer(signal) do
+    ret = ExPTY.Nif.kill(pipesocket, signal)
+    {:reply, ret, state}
   end
 
   @impl true

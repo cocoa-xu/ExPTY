@@ -30,6 +30,9 @@ defmodule ExPTY.Nif do
   def write(_pipesocket, _data),
     do: :erlang.nif_error(:not_loaded)
 
+  def kill(_pipesocket, _signal),
+    do: :erlang.nif_error(:not_loaded)
+
   def resize(_pipesocket, _cols, _rows),
     do: :erlang.nif_error(:not_loaded)
 
