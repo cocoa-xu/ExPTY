@@ -24,6 +24,10 @@ defmodule ExPTY.Nif do
 
   def spawn(_file, _args, _env, _cwd, _cols, _rows, _uid, _gid, _is_utf8, _closeFDs, _helperPath),
     do: :erlang.nif_error(:not_loaded)
+
   def write(_pipesocket, _data),
+    do: :erlang.nif_error(:not_loaded)
+
+  def resize(_pipesocket, _cols, _rows),
     do: :erlang.nif_error(:not_loaded)
 end

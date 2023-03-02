@@ -92,12 +92,12 @@ typedef struct pty_pipesocket_ {
 
   ErlNifEnv * env;
   ErlNifPid * process;
-  
+
   uv_async_t async;
   uv_thread_t tid;
   uv_mutex_t mutex;
   uv_pipe_t handle_;
-  
+
   static ErlNifResourceType * type;
   size_t write(void * data, size_t len);
 } pty_pipesocket;
@@ -143,7 +143,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   int uid, gid;
   bool is_utf8, closeFDs;
   std::string helper_path;
-  if (nif::get(env, argv[0], file) && 
+  if (nif::get(env, argv[0], file) &&
       nif::get_list(env, argv[1], args) &&
       nif::get_env(env, argv[2], envs) &&
       nif::get(env, argv[3], cwd) &&
@@ -312,7 +312,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
 
         ERL_NIF_TERM pipe_socket = enif_make_resource(env, (void *)pipesocket);
 
-        erl_ret = enif_make_tuple3(env, 
+        erl_ret = enif_make_tuple3(env,
           pipe_socket,
           enif_make_int(env, pid),
           ptsname_
@@ -396,6 +396,36 @@ static ERL_NIF_TERM expty_write(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   return erl_ret;
 }
 
+static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  pty_pipesocket * pipesocket = nullptr;
+  int cols = 0;
+  int rows = 0;
+
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket &&
+      nif::get(env, argv[1], &cols) && cols > 0 &&
+      nif::get(env, argv[2], &rows) && rows > 0) {
+
+    struct winsize winp;
+    winp.ws_col = cols;
+    winp.ws_row = rows;
+    winp.ws_xpixel = 0;
+    winp.ws_ypixel = 0;
+
+    if (ioctl(pipesocket->fd, TIOCSWINSZ, &winp) == -1) {
+      switch (errno) {
+        case EBADF: return nif::error(env, "ioctl(2) failed, EBADF");
+        case EFAULT: return nif::error(env, "ioctl(2) failed, EFAULT");
+        case EINVAL: return nif::error(env, "ioctl(2) failed, EINVAL");
+        case ENOTTY: return nif::error(env, "ioctl(2) failed, ENOTTY");
+      }
+      return nif::error(env, "ioctl(2) failed");
+    }
+    return nif::atom(env, "ok");
+  } else {
+    return nif::error(env, "Cannot get pipesocket resource");
+  }
+}
+
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno) {
   return nif::error(env, (
     message + std::string(strerror(_errno))
@@ -419,7 +449,7 @@ pty_pipesocket_fn(void *data) {
 
   int fd = pipesocket->fd;
   int activity;
-  
+
   while (!pipesocket->baton->fd_closed) {
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -429,11 +459,6 @@ pty_pipesocket_fn(void *data) {
     if ((activity < 0) && (errno != EINTR)) {
       continue;
     }
-
-    // if (activity == 0) {
-    //   continue;
-    // }
-    // printf("[debug] select activity:=%d\r\n", activity);
 
     if (FD_ISSET(fd, &readfds)) {
       size_t bytes_read = 0;
@@ -453,12 +478,12 @@ pty_pipesocket_fn(void *data) {
       ErlNifEnv * msg_env = enif_alloc_env();
       if ((ptr = enif_make_new_binary(msg_env, bytes_read, &dataread)) != nullptr) {
         memcpy(ptr, buffer, bytes_read);
-        enif_send(NULL, pipesocket->process, msg_env, enif_make_tuple2(msg_env, 
+        enif_send(NULL, pipesocket->process, msg_env, enif_make_tuple2(msg_env,
           nif::atom(msg_env, "data"),
           dataread
         ));
         enif_free_env(msg_env);
-      } 
+      }
     }
   }
 
@@ -533,7 +558,7 @@ pty_waitpid(void *data) {
   signal(SIGCHLD, SIG_IGN);
 
   ErlNifEnv * msg_env = enif_alloc_env();
-  enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env, 
+  enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env,
     nif::atom(msg_env, "exit"),
     enif_make_int(msg_env, baton->exit_code),
     enif_make_int(msg_env, baton->signal_code)
@@ -648,7 +673,8 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 
 static ErlNifFunc nif_functions[] = {
   {"spawn", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
-  {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND}
+  {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND}
 };
 
 ERL_NIF_INIT(Elixir.ExPTY.Nif, nif_functions, on_load, on_reload, on_upgrade, NULL);

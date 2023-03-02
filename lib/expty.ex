@@ -10,15 +10,15 @@ defmodule ExPTY do
   @spec default_pty_options() :: Keyword.t()
   def default_pty_options do
     [
-      name: "xterm-color",
-      cols: 80,
-      rows: 24,
-      env: System.get_env(),
-      cwd: Path.expand("~"),
-      encoding: "utf-8",
-      handleFlowControl: false,
-      flowControlPause: "\x13",
-      flowControlResume: "\x11",
+      name: Application.get_env(:expty, :name, "xterm-color"),
+      cols: Application.get_env(:expty, :cols, 80),
+      rows: Application.get_env(:expty, :rows, 24),
+      env: Application.get_env(:expty, :env, System.get_env()),
+      cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
+      encoding: Application.get_env(:expty, :encoding, "utf-8"),
+      handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
+      flow_control_pause: Application.get_env(:expty, :flow_control_pause, "\x13"),
+      flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11"),
       on_data: nil,
       on_exit: nil
     ]
@@ -72,7 +72,22 @@ defmodule ExPTY do
     end
   end
 
+  @spec resize(pid(), pos_integer, pos_integer) :: nil
+  def resize(pty, cols, rows)
+  when is_integer(cols) and cols > 0
+  and is_integer(rows) and rows > 0 do
+    GenServer.call(pty, {:resize, {cols, rows}})
+  end
+
   def flow_control(pty, enable?) when is_boolean(enable?) do
+
+  end
+
+  def pause(pty) do
+
+  end
+
+  def resume(pty) do
 
   end
 
@@ -155,6 +170,12 @@ defmodule ExPTY do
   end
 
   @impl true
+  def handle_call({:resize, cols, rows}, _from, %T{pipesocket: pipesocket}=state) do
+    ret = ExPTY.Nif.resize(pipesocket, cols, rows)
+    {:reply, ret, state}
+  end
+
+  @impl true
   def handle_info({:data, data}, %T{on_data: on_data}=state) do
     case on_data do
       {:module, module} ->
@@ -178,19 +199,5 @@ defmodule ExPTY do
         nil
     end
     {:noreply, state}
-  end
-
-  def resize(pty, columns, rows)
-  when is_integer(columns) and columns > 0
-  and is_integer(rows) and rows > 0 do
-
-  end
-
-  def pause(pty) do
-
-  end
-
-  def resume(pty) do
-
   end
 end
