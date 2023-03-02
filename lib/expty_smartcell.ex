@@ -12,7 +12,7 @@ else
       {:ok, pty} = ExPTY.spawn("bash", [])
       ctx = assign(ctx, [pty: pty])
       on_data = fn _,_,data ->
-        broadcast_event(ctx, "data", %{data: data})
+        broadcast_event(ctx, "data", %{data: Base.encode64(data)})
       end
       ExPTY.on_data(pty, on_data)
       {:ok, ctx}
@@ -25,7 +25,12 @@ else
 
     @impl true
     def handle_event("on_key", %{"data" => data}, ctx) do
-      ExPTY.write(ctx.assigns.pty, data)
+      case Base.decode64(data) do
+        {:ok, data} ->
+          ExPTY.write(ctx.assigns.pty, data)
+        _ ->
+          nil
+      end
       {:noreply, ctx}
     end
 
