@@ -273,7 +273,8 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_call({:kill, signal}, _from, %T{pipesocket: pipesocket} = state) when is_integer(signal) do
+  def handle_call({:kill, signal}, _from, %T{pipesocket: pipesocket} = state)
+      when is_integer(signal) do
     ret = ExPTY.Nif.kill(pipesocket, signal)
     {:reply, ret, state}
   end
