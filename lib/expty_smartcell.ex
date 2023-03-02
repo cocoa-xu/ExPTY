@@ -13,7 +13,7 @@ else
       ctx = assign(ctx, pty: pty)
 
       on_data = fn _, _, data ->
-        broadcast_event(ctx, "data", %{data: data})
+        broadcast_event(ctx, "data", %{data: Base.encode64(data)})
       end
 
       ExPTY.on_data(pty, on_data)
