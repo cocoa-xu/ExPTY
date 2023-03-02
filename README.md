@@ -1,3 +1,7 @@
+**(Warning: this project is still WIP, there are a lot of things (like proper cleanups) not done yet, and right now it shows a minimal working product (without proper cleanups yet!) with Kino. Use at your own risk.**
+
+**Any help/PR is welcome!**
+
 # ExPTY
 
 `ExPTY` firstly fills the gap that executables spawned by `Port` do not have a tty available to them.
