@@ -14,9 +14,11 @@ defmodule ExPTY.Nif do
 
   def helper_path do
     helper_path = "#{:code.priv_dir(:expty)}/spawn-helper"
+
     case :os.type() do
       {:win32, _} ->
         helper_path <> ".exe"
+
       _ ->
         helper_path
     end
@@ -29,5 +31,11 @@ defmodule ExPTY.Nif do
     do: :erlang.nif_error(:not_loaded)
 
   def resize(_pipesocket, _cols, _rows),
+    do: :erlang.nif_error(:not_loaded)
+
+  def pause(_pipesocket),
+    do: :erlang.nif_error(:not_loaded)
+
+  def resume(_pipesocket),
     do: :erlang.nif_error(:not_loaded)
 end

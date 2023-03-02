@@ -70,6 +70,14 @@
   #define POSIX_SPAWN_USEVFORK 0
 #endif
 
+#if defined(__APPLE__)
+#define PTY_GETATTR TIOCGETA
+#define PTY_SETATTR TIOCSETA
+#else
+#define PTY_GETATTR TCGETA
+#define PTY_SETATTR TCSETA
+#endif
+
 /**
  * Structs
  */
@@ -426,6 +434,40 @@ static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM ar
   }
 }
 
+static ERL_NIF_TERM expty_pause(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  pty_pipesocket * pipesocket = nullptr;
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket) {
+    struct termios term;
+    if (ioctl(pipesocket->fd, PTY_GETATTR, &term) == -1) {
+      return nif::error(env, "ioctl get failed.\n");
+    }
+    term.c_iflag |= IXON | IXOFF;
+    if (ioctl(pipesocket->fd, PTY_SETATTR, &term) == -1) {
+      return nif::error(env, "ioctl set failed.\n");
+    }
+    return nif::atom(env, "ok");
+  } else {
+    return nif::error(env, "Cannot get pipesocket resource");
+  }
+}
+
+static ERL_NIF_TERM expty_resume(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  pty_pipesocket * pipesocket = nullptr;
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket) {
+    struct termios term;
+    if (ioctl(pipesocket->fd, PTY_GETATTR, &term) == -1) {
+      return nif::error(env, "ioctl get failed.\n");
+    }
+    term.c_iflag &= ~(IXON | IXOFF | IXANY);
+    if (ioctl(pipesocket->fd, PTY_SETATTR, &term) == -1) {
+      return nif::error(env, "ioctl set failed.\n");
+    }
+    return nif::atom(env, "ok");
+  } else {
+    return nif::error(env, "Cannot get pipesocket resource");
+  }
+}
+
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno) {
   return nif::error(env, (
     message + std::string(strerror(_errno))
@@ -674,7 +716,9 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 static ErlNifFunc nif_functions[] = {
   {"spawn", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
-  {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND}
+  {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"pause", 1, expty_pause, ERL_DIRTY_JOB_IO_BOUND},
+  {"resume", 1, expty_resume, ERL_DIRTY_JOB_IO_BOUND}
 };
 
 ERL_NIF_INIT(Elixir.ExPTY.Nif, nif_functions, on_load, on_reload, on_upgrade, NULL);
