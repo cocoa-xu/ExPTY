@@ -29,7 +29,6 @@ defmodule ExPTY.MixProject do
     [
       {:elixir_make, "~> 0.7", runtime: false},
       {:cc_precompiler, "~> 0.1", runtime: false},
-
       {:kino, "~> 0.7", optional: true}
     ]
   end
