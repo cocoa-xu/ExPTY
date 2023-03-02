@@ -4,7 +4,7 @@
 
 # ExPTY
 
-`ExPTY` firstly fills the gap that executables spawned by `Port` do not have a tty available to them.
+`ExPTY` fills the gap where executables spawned by `Port` do not have a tty available to them.
 
 <table>
 <tr>
@@ -17,7 +17,7 @@
 ```elixir
 iex> pty = ExPTY.spawn("tty", [], on_data: fn _, _, data -> IO.write(data) end)
 #PID<0.229.0>
-/dev/ttys032
+/dev/ttys001
 ```
 
 </td>
@@ -38,7 +38,7 @@ iex> flush()
 </tr>
 </table>
 
-Most importantly, and as a consequence of the first point, we can now forward all data to somewhere else (e.g., via WebSocket to LiveBook) have a full terminal experience.
+Most importantly, and as a consequence of the point above, we can now forward all data to somewhere else (e.g., via WebSocket to LiveBook) have a full terminal experience.
 
 ## Example
 
