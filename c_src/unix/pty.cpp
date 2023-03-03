@@ -111,21 +111,6 @@ typedef struct pty_pipesocket_ {
 } pty_pipesocket;
 ErlNifResourceType * pty_pipesocket::type = NULL;
 
-typedef struct nif_globals_ {
-  ErlNifResourceType *fn;
-  ErlNifResourceType *hostfxr_resource;
-  ErlNifResourceType *bridge_resource;
-  ErlNifResourceType *callback_resource;
-  ErlNifResourceType *pointer_resource;
-  ErlNifPid owner;
-} nif_globals;
-
-typedef struct callback_resource_ {
-  ErlNifCond* condition;
-  ErlNifEnv* env;
-  ERL_NIF_TERM result;
-} callback_resource;
-
 static int pty_nonblock(int fd);
 static int pty_openpty(int *, int *, char *,
   const struct termios *,
