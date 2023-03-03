@@ -84,34 +84,30 @@ int get(ErlNifEnv *env, ERL_NIF_TERM term, int64_t *var)
 
 int get(ErlNifEnv *env, ERL_NIF_TERM term, std::string &var)
 {
-  unsigned len;
-  int ret = enif_get_list_length(env, term, &len);
-
-  if (!ret)
+  ErlNifBinary bin;
+  if (enif_inspect_binary(env, term, &bin))
   {
-    ErlNifBinary bin;
-    ret = enif_inspect_binary(env, term, &bin);
-    if (!ret)
-    {
-      return 0;
-    }
     var = std::string((const char *)bin.data, bin.size);
+    return 1;
+  }
+
+  unsigned len;
+  if (enif_get_list_length(env, term, &len)) {
+    var.resize(len + 1);
+    int ret = enif_get_string(env, term, &*(var.begin()), var.size(), ERL_NIF_LATIN1);
+
+    if (ret > 0)
+    {
+      var.resize(ret - 1);
+    }
+    else if (ret == 0)
+    {
+      var.resize(0);
+    }
     return ret;
   }
 
-  var.resize(len + 1);
-  ret = enif_get_string(env, term, &*(var.begin()), var.size(), ERL_NIF_LATIN1);
-
-  if (ret > 0)
-  {
-    var.resize(ret - 1);
-  }
-  else if (ret == 0)
-  {
-    var.resize(0);
-  }
-
-  return ret;
+  return 0;
 }
 
 int get_list(ErlNifEnv *env, ERL_NIF_TERM list, std::vector<std::string> &var)
