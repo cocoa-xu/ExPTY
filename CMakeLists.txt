@@ -30,7 +30,8 @@ endif()
 
 if(WIN32)
     string(REPLACE "\\" "/" C_SRC "${C_SRC}")
-    file(GLOB expty_src "${C_SRC}/win/*.cc")
+    file(GLOB expty_src "${C_SRC}/win/path_util.cc" "${C_SRC}/win/conpty.cc")
+    file(GLOB expty_conpty_console_list_src "${C_SRC}/win/conpty_console_list.cc")
 else()
     file(GLOB expty_src "${C_SRC}/unix/pty.cpp")
     file(GLOB expty_spawn_helper_src "${C_SRC}/unix/spawn-helper.cpp")
@@ -58,7 +59,14 @@ set_target_properties(expty PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-if(NOT WIN32)
+if(WIN32)
+    add_executable(conpty_console_list ${expty_conpty_console_list_src})
+    install(
+        TARGETS conpty_console_list
+        RUNTIME DESTINATION "${PRIV_DIR}"
+    )
+    set_property(TARGET conpty_console_list PROPERTY CXX_STANDARD 14)
+else()
     add_executable(spawn-helper ${expty_spawn_helper_src})
     install(
         TARGETS spawn-helper
