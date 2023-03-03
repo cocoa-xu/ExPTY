@@ -31,10 +31,11 @@ endif()
 if(WIN32)
     string(REPLACE "\\" "/" C_SRC "${C_SRC}")
 else()
-    file(GLOB expty_spawn_helper_src "${C_SRC}/spawn-helper.cpp" "${C_SRC}/common.h")
+    file(GLOB expty_src "${C_SRC}/unix/pty.cpp")
+    file(GLOB expty_spawn_helper_src "${C_SRC}/unix/spawn-helper.cpp")
 endif()
 
-add_library(expty SHARED "${C_SRC}/pty.cpp" "${C_SRC}/common.h")
+add_library(expty SHARED ${expty_src})
 target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
 target_link_libraries(expty "uv_a")
@@ -53,7 +54,7 @@ set_target_properties(expty PROPERTIES
 )
 
 
-add_executable(spawn-helper "${C_SRC}/spawn-helper.cpp" "${C_SRC}/common.h")
+add_executable(spawn-helper ${expty_spawn_helper_src})
 install(
     TARGETS spawn-helper
     RUNTIME DESTINATION "${PRIV_DIR}"
@@ -71,6 +72,7 @@ elseif(UNIX AND APPLE)
 endif()
 
 include_directories(${ERTS_INCLUDE_DIR})
+include_directories(${C_SRC})
 if(WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /wd4996 /wd4267 /wd4068")
 else()
