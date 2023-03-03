@@ -13,32 +13,49 @@ defmodule ExPTY.Nif do
   end
 
   def helper_path do
-    helper_path = "#{:code.priv_dir(:expty)}/spawn-helper"
-
     case :os.type() do
       {:win32, _} ->
-        helper_path <> ".exe"
+        nil
 
       _ ->
-        helper_path
+        "#{:code.priv_dir(:expty)}/spawn-helper"
     end
   end
 
-  def spawn(_file, _args, _env, _cwd, _cols, _rows, _uid, _gid, _is_utf8, _closeFDs, _helperPath),
-    do: :erlang.nif_error(:not_loaded)
+  case :os.type() do
+    {:win32, _} ->
+      def start_process(_file, _cols, _rows, _debug, _pipe_name, _inherit_cursor),
+        do: :erlang.nif_error(:not_loaded)
 
-  def write(_pipesocket, _data),
-    do: :erlang.nif_error(:not_loaded)
+    _ ->
+      def spawn(
+            _file,
+            _args,
+            _env,
+            _cwd,
+            _cols,
+            _rows,
+            _uid,
+            _gid,
+            _is_utf8,
+            _closeFDs,
+            _helperPath
+          ),
+          do: :erlang.nif_error(:not_loaded)
 
-  def kill(_pipesocket, _signal),
-    do: :erlang.nif_error(:not_loaded)
+      def write(_pipesocket, _data),
+        do: :erlang.nif_error(:not_loaded)
 
-  def resize(_pipesocket, _cols, _rows),
-    do: :erlang.nif_error(:not_loaded)
+      def kill(_pipesocket, _signal),
+        do: :erlang.nif_error(:not_loaded)
 
-  def pause(_pipesocket),
-    do: :erlang.nif_error(:not_loaded)
+      def resize(_pipesocket, _cols, _rows),
+        do: :erlang.nif_error(:not_loaded)
 
-  def resume(_pipesocket),
-    do: :erlang.nif_error(:not_loaded)
+      def pause(_pipesocket),
+        do: :erlang.nif_error(:not_loaded)
+
+      def resume(_pipesocket),
+        do: :erlang.nif_error(:not_loaded)
+  end
 end
