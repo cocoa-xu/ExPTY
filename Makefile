@@ -7,7 +7,7 @@ LIB_SRC = $(shell pwd)/lib
 LIBUV_SRC = $(shell pwd)/3rd_party/libuv-1.44.2
 LIBUV_BUILD_DIR = $(MIX_APP_PATH)/cmake_libuv-1.44.2
 LIBUV_INSTALL_DIR = $(MIX_APP_PATH)/libuv
-LIBUV_A = $(PRIV_DIR)/lib/libuv_a.a
+LIBUV_A = $(LIBUV_INSTALL_DIR)/lib/libuv_a.a
 NIF_BUILD_DIR = $(MIX_APP_PATH)/cmake_expty
 
 DEFAULT_JOBS ?= 1
