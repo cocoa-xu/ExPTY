@@ -13,17 +13,6 @@ NIF_BUILD_DIR = $(MIX_APP_PATH)/cmake_expty
 DEFAULT_JOBS ?= 1
 MAKE_BUILD_FLAGS ?= -j$(DEFAULT_JOBS)
 
-UNAME_S := $(shell uname -s)
-ifndef TARGET_ABI
-ifeq ($(UNAME_S),Darwin)
-	TARGET_ABI = darwin
-endif
-endif
-
-ifeq ($(TARGET_ABI),darwin)
-	CPPFLAGS += -undefined dynamic_lookup -flat_namespace -undefined suppress
-endif
-
 .DEFAULT_GLOBAL := build
 
 build: $(NIF_SO)
