@@ -30,6 +30,7 @@ endif()
 
 if(WIN32)
     string(REPLACE "\\" "/" C_SRC "${C_SRC}")
+    file(GLOB expty_src "${C_SRC}/win/*.cc")
 else()
     file(GLOB expty_src "${C_SRC}/unix/pty.cpp")
     file(GLOB expty_spawn_helper_src "${C_SRC}/unix/spawn-helper.cpp")
@@ -38,7 +39,11 @@ endif()
 add_library(expty SHARED ${expty_src})
 target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
-target_link_libraries(expty "uv_a")
+if(WIN32)
+    target_link_libraries(expty "uv_a" "Shlwapi")
+else()
+    target_link_libraries(expty "uv_a")
+endif()
 install(
     TARGETS expty
     DESTINATION "${PRIV_DIR}"
@@ -53,14 +58,14 @@ set_target_properties(expty PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-
-add_executable(spawn-helper ${expty_spawn_helper_src})
-install(
-    TARGETS spawn-helper
-    RUNTIME DESTINATION "${PRIV_DIR}"
-)
-set_property(TARGET spawn-helper PROPERTY CXX_STANDARD 14)
-
+if(NOT WIN32)
+    add_executable(spawn-helper ${expty_spawn_helper_src})
+    install(
+        TARGETS spawn-helper
+        RUNTIME DESTINATION "${PRIV_DIR}"
+    )
+    set_property(TARGET spawn-helper PROPERTY CXX_STANDARD 14)
+endif()
 
 if(UNIX AND NOT APPLE)
     set_target_properties(expty PROPERTIES INSTALL_RPATH "\$ORIGIN/lib")
