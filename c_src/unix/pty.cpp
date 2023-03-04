@@ -150,6 +150,11 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
 
     int envc = (int)envs.size();
     char **envs_c = new char*[envc+1];
+    if (envs_c == NULL) {
+      erl_ret = nif::error(env, "Could not allocate memory for envs.");
+      goto done;
+    }
+
     envs_c[envc] = NULL;
     for (int i = 0; i < envc; i++) {
       envs_c[i] = strdup(envs[i].c_str());
@@ -203,6 +208,10 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     int argc = (int)args.size();
     int argl = argc + EXTRA_ARGS + 1;
     char **argv = new char*[argl];
+    if (argv == NULL) {
+      erl_ret = nif::error(env, "Could not allocate memory for argv.");
+      goto done;
+    }
     argv[0] = strdup(helper_path.c_str());
     argv[1] = strdup(cwd.c_str());
     argv[2] = strdup(std::to_string(uid).c_str());
@@ -255,8 +264,21 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     }
     posix_spawnattr_setflags(&attrs, flags);
 
+    pty_pipesocket * pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
+    if (pipesocket == NULL) {
+      erl_ret = nif::error(env, "Could not allocate memory for pipesocket resource.");
+      goto done;
+    }
+
+    ErlNifPid* process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
+    if (process == NULL) {
+      erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
+      goto done;
+    }
+    process = enif_self(env, process);
+
+    pid_t pid;
     { // suppresses "jump bypasses variable initialization" errors
-      pid_t pid;
       auto error = posix_spawn(&pid, argv[0], &acts, &attrs, argv, envs_c);
 
       close(comms_pipe[1]);
@@ -286,17 +308,8 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         goto done;
       }
 
-      pty_pipesocket * pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
-      if (pipesocket == NULL) {
-        erl_ret = nif::error(env, "Could not allocate memory for resource.");
-        // todo: cleanup
-        goto done;
-      }
-
       bool success = false;
       ERL_NIF_TERM ptsname_ = nif::make_string(env, ptsname(master), success);
-      ErlNifPid* process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
-      process = enif_self(env, process);
 
       if (success) {
         pipesocket->fd = master;
@@ -304,7 +317,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         pipesocket->process = process;
 
         ERL_NIF_TERM pipe_socket = enif_make_resource(env, (void *)pipesocket);
-
         erl_ret = enif_make_tuple3(env,
           pipe_socket,
           enif_make_int(env, pid),
@@ -312,12 +324,13 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         );
       } else {
         erl_ret = nif::error(env, "Could not allocate memory for ptsname.");
-        // todo: cleanup
+        kill(pid, SIGKILL);
         goto done;
       }
 
       if (pty_nonblock(master) == -1) {
         erl_ret = nif::error(env, "Could not set master fd to nonblocking.");
+        kill(pid, SIGKILL);
         goto done;
       }
 
