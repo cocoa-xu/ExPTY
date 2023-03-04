@@ -5,6 +5,8 @@ if(NOT DEFINED CMAKE_BUILD_TYPE OR "${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+# ========= PRIV_DIR & ERTS_INCLUDE_DIR =========
+
 if(DEFINED MIX_APP_PATH AND NOT "${MIX_APP_PATH}" STREQUAL "")
     set(PRIV_DIR "${MIX_APP_PATH}/priv")
 else()
@@ -24,6 +26,11 @@ else()
 endif()
 message(STATUS "Using ERTS_INCLUDE_DIR: ${ERTS_INCLUDE_DIR}")
 
+include_directories(${ERTS_INCLUDE_DIR})
+include_directories(${C_SRC})
+
+# ===============================================
+
 if(POLICY CMP0068)
     cmake_policy(SET CMP0068 NEW)
 endif()
@@ -37,27 +44,28 @@ else()
     file(GLOB expty_spawn_helper_src "${C_SRC}/unix/spawn-helper.cpp")
 endif()
 
+# ==================== expty ====================
+
 add_library(expty SHARED ${expty_src})
 target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
-if(WIN32)
-    target_link_libraries(expty "uv_a" "Shlwapi")
-else()
-    target_link_libraries(expty "uv_a")
-endif()
-install(
-    TARGETS expty
-    DESTINATION "${PRIV_DIR}"
-)
 set_property(TARGET expty PROPERTY CXX_STANDARD 14)
 set_target_properties(expty PROPERTIES PREFIX "")
-if(NOT WIN32)
-    set_target_properties(expty PROPERTIES SUFFIX ".so")
-endif()
 set_target_properties(expty PROPERTIES
     INSTALL_RPATH_USE_LINK_PATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
 )
+install(TARGETS expty DESTINATION "${PRIV_DIR}")
+if(NOT WIN32)
+    set_target_properties(expty PROPERTIES SUFFIX ".so")
+    target_link_libraries(expty "uv_a")
+else()
+    target_link_libraries(expty "uv_a" "Shlwapi")
+endif()
+
+# ===============================================
+
+# ==================== helper ====================
 
 if(WIN32)
     add_executable(conpty_console_list ${expty_conpty_console_list_src})
@@ -75,6 +83,8 @@ else()
     set_property(TARGET spawn-helper PROPERTY CXX_STANDARD 14)
 endif()
 
+# ===============================================
+
 if(UNIX AND NOT APPLE)
     set_target_properties(expty PROPERTIES INSTALL_RPATH "\$ORIGIN/lib")
 elseif(UNIX AND APPLE)
@@ -84,8 +94,6 @@ elseif(UNIX AND APPLE)
     set_target_properties(expty PROPERTIES INSTALL_RPATH "@loader_path/lib")
 endif()
 
-include_directories(${ERTS_INCLUDE_DIR})
-include_directories(${C_SRC})
 if(WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj /wd4996 /wd4267 /wd4068")
 else()
