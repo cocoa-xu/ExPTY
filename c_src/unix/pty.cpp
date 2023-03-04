@@ -148,11 +148,15 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[9], &closeFDs) &&
       nif::get(env, argv[10], helper_path)) {
 
+    pty_pipesocket * pipesocket = NULL;
+    ErlNifPid* process = NULL;
+    int ret = 0;
+    int flags = POSIX_SPAWN_USEVFORK;
+
     int envc = (int)envs.size();
-    char **envs_c = new char*[envc+1];
+    char ** envs_c = new char*[envc+1];
     if (envs_c == NULL) {
-      erl_ret = nif::error(env, "Could not allocate memory for envs.");
-      goto done;
+      return nif::error(env, "Could not allocate memory for envs.");
     }
 
     envs_c[envc] = NULL;
@@ -227,7 +231,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     cfsetospeed(term, B38400);
 
     sigset_t newmask, oldmask;
-    int flags = POSIX_SPAWN_USEVFORK;
 
     // temporarily block all signals
     // this is needed due to a race condition in openpty
@@ -237,7 +240,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     pthread_sigmask(SIG_SETMASK, &newmask, &oldmask);
 
     int master, slave;
-    int ret = pty_openpty(&master, &slave, nullptr, term, &winp);
+    ret = pty_openpty(&master, &slave, nullptr, term, &winp);
     if (ret == -1) {
       erl_ret = nif::error(env, "openpty() failed.");
       goto done;
@@ -264,13 +267,13 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     }
     posix_spawnattr_setflags(&attrs, flags);
 
-    pty_pipesocket * pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
+    pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
     if (pipesocket == NULL) {
       erl_ret = nif::error(env, "Could not allocate memory for pipesocket resource.");
       goto done;
     }
 
-    ErlNifPid* process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
+    process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
     if (process == NULL) {
       erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
       goto done;
