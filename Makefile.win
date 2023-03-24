@@ -1,0 +1,53 @@
+!IFNDEF MIX_APP_PATH
+MIX_APP_PATH=$(MAKEDIR)
+!ENDIF
+
+PRIV_DIR = $(MIX_APP_PATH)/priv
+NIF_SO = $(PRIV_DIR)/expty.dll
+
+C_SRC = $(MAKEDIR)\c_src
+LIB_SRC = $(MAKEDIR)\lib
+LIBUV_SRC = $(MAKEDIR)\3rd_party\libuv-1.44.2
+LIBUV_BUILD_DIR = $(MIX_APP_PATH)/cmake_libuv-1.44.2
+LIBUV_INSTALL_DIR = $(MIX_APP_PATH)/libuv
+LIBUV_A = $(LIBUV_INSTALL_DIR)/lib/uv_a.lib
+NIF_BUILD_DIR = $(MIX_APP_PATH)/cmake_expty
+
+!IFNDEF CMAKE_BUILD_TYPE
+CMAKE_BUILD_TYPE=Release
+!ENDIF
+
+build: $(NIF_SO)
+
+$(PRIV_DIR):
+    @ if not exist "$(PRIV_DIR)" mkdir "$(PRIV_DIR)"
+
+$(LIBUV_BUILD_DIR):
+	@ if not exist "$(LIBUV_BUILD_DIR)" mkdir "$(LIBUV_BUILD_DIR)"
+
+$(NIF_BUILD_DIR):
+	@ if not exist "$(NIF_BUILD_DIR)" mkdir "$(NIF_BUILD_DIR)"
+
+$(LIBUV_A): $(PRIV_DIR) $(LIBUV_BUILD_DIR)
+	@ if not exist "$(LIBUV_A)" ( \
+		cd "$(LIBUV_BUILD_DIR)" && \
+		cmake "$(LIBUV_SRC)" -D CMAKE_INSTALL_PREFIX="$(LIBUV_INSTALL_DIR)" \
+			-D BUILD_TESTING=OFF && \
+		cmake --build . $(MAKE_BUILD_FLAGS) --config "$(CMAKE_BUILD_TYPE)" && \
+		cmake --install . --config "$(CMAKE_BUILD_TYPE)" \
+	)
+
+$(NIF_SO): $(PRIV_DIR) $(NIF_BUILD_DIR) $(LIBUV_A)
+	@ if not exist "$(NIF_SO)" ( \
+		cd "$(NIF_BUILD_DIR)" && \
+		cmake "$(MAKEDIR)" -D CMAKE_INSTALL_PREFIX="$(PRIV_DIR)" \
+			-D LIBUV_INCLUDE_DIR="$(LIBUV_INSTALL_DIR)/include" \
+			-D LIBUV_LIBRARIES_DIR="$(LIBUV_INSTALL_DIR)/lib" \
+			-D C_SRC="$(C_SRC)" \
+			-D CMAKE_TOOLCHAIN_FILE="$(TOOLCHAIN_FILE)" \
+			-D MIX_APP_PATH="$(MIX_APP_PATH)" \
+			-D PRIV_DIR="$(PRIV_DIR)" \
+			-D ERTS_INCLUDE_DIR="$(ERTS_INCLUDE_DIR)" && \
+		cmake --build . $(MAKE_BUILD_FLAGS) --config "$(CMAKE_BUILD_TYPE)" && \
+		cmake --install . --config "$(CMAKE_BUILD_TYPE)" \
+	)
