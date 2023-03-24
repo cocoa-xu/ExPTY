@@ -43,6 +43,11 @@ case :os.type() do
         GenServer.call(pty, {:write, data})
       end
 
+      @spec kill(pid, integer) :: :ok
+      def kill(_pty, signal) when is_integer(signal) do
+        raise "kill/2 is not implemeted on Windows yet"
+      end
+
       def on_data(pty, callback) when is_function(callback, 3) do
         GenServer.call(pty, {:update_on_data, {:func, callback}})
       end
@@ -222,6 +227,31 @@ case :os.type() do
       end
     end
 
-  _ ->
-    nil
+  platform ->
+    defmodule ExPTY.Win do
+      @platform platform
+      def spawn(_file, _args, _pty_options) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+
+      def write(_pty, _data) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+
+      def kill(_pty, _signal) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+
+      def on_data(_pty, _callback) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+
+      def on_exit(_pty, _callback) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+
+      def resize(_pty, _cols, _rows) do
+        raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+      end
+    end
 end

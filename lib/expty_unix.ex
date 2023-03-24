@@ -1,6 +1,27 @@
 case :os.type() do
-  {:win32, _} ->
-    nil
+  {:win32, _} = platform ->
+      defmodule ExPTY.Unix do
+        @platform platform
+        def spawn(_file, _args, _pty_options) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+
+        def write(_pty, _data) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+
+        def on_data(_pty, _callback) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+
+        def on_exit(_pty, _callback) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+
+        def resize(_pty, _cols, _rows) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+      end
 
   _ ->
     defmodule ExPTY.Unix do

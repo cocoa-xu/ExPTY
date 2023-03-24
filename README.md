@@ -15,10 +15,6 @@
 <td>
 
 ```elixir
-# For Unix (I'll unify these two later)
-iex> alias ExPTY.Unix, as ExPTY
-# For Windows (I'll unify these two later)
-iex> alias ExPTY.Win, as ExPTY
 iex> pty = ExPTY.spawn("tty", [], on_data: fn _, _, data -> IO.write(data) end)
 #PID<0.229.0>
 /dev/ttys001
@@ -47,13 +43,7 @@ Most importantly, and as a consequence of the point above, we can now forward al
 ## Example
 
 ```elixir
-defmodule Example do
-  # For Unix (I'll unify these two later)
-  alias ExPTY.Unix, as ExPTY
-
-  # For Windows (I'll unify these two later)
-  alias ExPTY.Win, as ExPTY
-  
+defmodule Example do  
   def run do
     {:ok, pty} =
       ExPTY.spawn("tty", [],
