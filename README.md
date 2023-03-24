@@ -69,6 +69,29 @@ end
 
 ## Installation
 
+### Unix
+For Unix systems it's pretty much what you would expect, a working C/C++ toolchain, CMake, Make.
+
+### Windows
+For Windows users, if you're not using Livebook, it's also the same as installing any other NIF libraries. However, if you're trying to install it on a Livebook, you need to set up some environment variables. 
+
+Normally, these environment variables would be by `vcvarsall.bat` in your cmd (or powershell, or any other shell), but here we have to do it manually:
+
+- Open the `x64 Native Tools Command Prompt` (on 64-bit system) or `x86 Native Tools Command Prompt` (on 32-bit system)
+- In the command prompt window, type `set`, and you will see all the environment variables
+- Copy the output printed by `set` command, and store them in a variable (say `env`) in the setup cell in your livebook
+- export these environment variables before `Mix.install` using the following code
+
+```elixir
+Enum.each(String.split(env, "\n"), fn env_var ->
+  case String.split(env_var, "=", parts: 2) do
+    [name, value] ->
+      System.put_env(name, value)
+    _ -> :ok
+  end
+end)
+```
+
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed
 by adding `ExPTY` to your list of dependencies in `mix.exs`:
 
