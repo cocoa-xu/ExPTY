@@ -77,7 +77,7 @@ For Windows users, if you're not using Livebook, it's also the same as installin
   
 **However, if you're trying to install it on a Livebook, you need to set up some environment variables.**
 
-Normally, these environment variables would be by `vcvarsall.bat` in your cmd (or powershell, or any other shell), but here we have to do it manually:
+Normally, these environment variables would be set by `vcvarsall.bat` in your cmd (or powershell, or any other shell), but here we have to do it manually:
 
 - Open the `x64 Native Tools Command Prompt` (on 64-bit system) or `x86 Native Tools Command Prompt` (on 32-bit system)
 - In the command prompt window, type `set`, and you will see all the environment variables
