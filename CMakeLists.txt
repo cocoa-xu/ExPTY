@@ -60,7 +60,7 @@ if(NOT WIN32)
     set_target_properties(expty PROPERTIES SUFFIX ".so")
     target_link_libraries(expty "uv_a")
 else()
-    target_link_libraries(expty "uv_a" "Shlwapi")
+    target_link_libraries(expty PRIVATE "uv_a" "Shlwapi" "Ws2_32" "Iphlpapi" "Userenv")
 endif()
 
 # ===============================================

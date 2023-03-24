@@ -3,12 +3,7 @@ defmodule ExPTY.Application do
   use Application
 
   def start(_type, _args) do
-    case :os.type() do
-      {:win32, _} ->
-        nil
-      _ ->
-        if Code.ensure_loaded?(Kino), do: Kino.SmartCell.register(ExPTY.SmartCell)
-    end
+    if Code.ensure_loaded?(Kino), do: Kino.SmartCell.register(ExPTY.SmartCell)
     Supervisor.start_link([], strategy: :one_for_one)
   end
 end

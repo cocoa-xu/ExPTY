@@ -24,7 +24,16 @@ defmodule ExPTY.Nif do
 
   case :os.type() do
     {:win32, _} ->
-      def start_process(_file, _cols, _rows, _debug, _pipe_name, _inherit_cursor),
+      def spawn(_file, _cols, _rows, _debug, _pipe_name, _inherit_cursor),
+        do: :erlang.nif_error(:not_loaded)
+
+      def write(_pty, _data),
+        do: :erlang.nif_error(:not_loaded)
+
+      def resize(_pty_id, _cols, _rows),
+        do: :erlang.nif_error(:not_loaded)
+
+      def priv_connect(_pty_id, _file, _args, _cwd, _env),
         do: :erlang.nif_error(:not_loaded)
 
     _ ->

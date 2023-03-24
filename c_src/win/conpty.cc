@@ -38,6 +38,11 @@ typedef HRESULT (__stdcall *PFNCREATEPSEUDOCONSOLE)(COORD c, HANDLE hIn, HANDLE 
 typedef HRESULT (__stdcall *PFNRESIZEPSEUDOCONSOLE)(HPCON hpc, COORD newSize);
 typedef void (__stdcall *PFNCLOSEPSEUDOCONSOLE)(HPCON hpc);
 
+VOID CALLBACK OnProcessExitWinEvent(
+    _In_ PVOID context,
+    _In_ BOOLEAN TimerOrWaitFired);
+static void OnProcessExit(uv_async_t *async);
+
 struct pty_baton {
   ErlNifEnv *env;
   ErlNifPid * process;
@@ -46,15 +51,115 @@ struct pty_baton {
   HANDLE hIn;
   HANDLE hOut;
   HPCON hpc;
+  std::wstring inName, outName;
+  HANDLE hRealIn;
+  bool write_ready{false};
+  uv_mutex_t mutex;
 
   HANDLE hShell;
   HANDLE hWait;
   uv_async_t async;
   uv_thread_t tid;
 
-  pty_baton(ErlNifEnv *_env, ErlNifPid *_process, int _id, HANDLE _hIn, HANDLE _hOut, HPCON _hpc) : 
-  env(_env), process(_process), id(_id), hIn(_hIn), hOut(_hOut), hpc(_hpc) {};
+  pty_baton(ErlNifEnv *_env, ErlNifPid *_process, int _id, HANDLE _hIn, HANDLE _hOut, HPCON _hpc, std::wstring _inName, std::wstring _outName) : 
+  env(_env), process(_process), id(_id), hIn(_hIn), hOut(_hOut), hpc(_hpc), inName(_inName), outName(_outName) {};
+
+  DWORD write(void * data, size_t len);
 };
+
+DWORD pty_baton::write(void * data, size_t len) {
+  // Write data to the named pipe server instance
+  DWORD dwWritten;
+  if (!this->write_ready) return 0;
+
+  uv_mutex_lock(&this->mutex);
+
+  if (!WriteFile(this->hRealIn, data, len, &dwWritten, NULL)) {
+    return 0;
+  }
+
+  uv_mutex_unlock(&this->mutex);
+
+  return dwWritten;
+}
+
+static void create_write_pipe(void *data) {
+  pty_baton *baton = static_cast<pty_baton*>(data);
+
+  if (baton->write_ready) return;
+
+  HANDLE hPipe;
+  while (true) {
+    hPipe  = CreateFileW(
+      baton->inName.c_str(), // Pipe name
+      GENERIC_WRITE,             // Write access
+      0,                          // No sharing
+      NULL,                       // Default security attributes
+      OPEN_EXISTING,              // Opens the existing pipe instance
+      0,                          // Default attributes
+      NULL                        // No template file
+    );
+
+    if (hPipe != INVALID_HANDLE_VALUE)
+    {
+      break;
+    }
+  }
+
+  baton->hRealIn = hPipe;
+  baton->write_ready = true;
+}
+
+static void read_data(void *data) {
+  pty_baton *baton = static_cast<pty_baton*>(data);
+
+  DWORD dwRead;
+  char buffer[1024];
+
+  HANDLE hPipe;
+  while (true) {
+    hPipe  = CreateFileW(
+      baton->outName.c_str(), // Pipe name
+      GENERIC_READ,             // Write access
+      0,                          // No sharing
+      NULL,                       // Default security attributes
+      OPEN_EXISTING,              // Opens the existing pipe instance
+      0,                          // Default attributes
+      NULL                        // No template file
+    );
+
+    if (hPipe != INVALID_HANDLE_VALUE)
+    {
+      break;
+    }
+  }
+
+  while (true) {
+    // TODO:Wait for the named pipe to become available
+    // while (!WaitNamedPipeW(baton->outName.c_str(), 5000)) {
+    //   // The pipe is not available yet
+    // }
+
+    // Data is available to read
+    // Read data from the named pipe client instance
+    dwRead = 0;
+    ReadFile(hPipe, buffer, sizeof(buffer), &dwRead, NULL);
+    if (dwRead) {
+      ERL_NIF_TERM dataread;
+      unsigned char * ptr;
+
+      ErlNifEnv * msg_env = enif_alloc_env();
+      if ((ptr = enif_make_new_binary(msg_env, dwRead, &dataread)) != nullptr) {
+        memcpy(ptr, buffer, dwRead);
+        enif_send(NULL, baton->process, msg_env, enif_make_tuple2(msg_env,
+          nif::atom(msg_env, "data"),
+          dataread
+        ));
+        enif_free_env(msg_env);
+      }
+    }
+  }
+}
 
 static std::vector<pty_baton*> ptyHandles;
 static volatile LONG ptyCounter;
@@ -74,16 +179,6 @@ std::vector<T> vectorFromString(const std::basic_string<T> &str) {
     return std::vector<T>(str.begin(), str.end());
 }
 
-// void throwNanError(const Nan::FunctionCallbackInfo<v8::Value>* info, const char* text, const bool getLastError) {
-//   std::stringstream errorText;
-//   errorText << text;
-//   if (getLastError) {
-//     errorText << ", error code: " << GetLastError();
-//   }
-//   Nan::ThrowError(errorText.str().c_str());
-//   (*info).GetReturnValue().SetUndefined();
-// }
-
 // Returns a new server named pipe.  It has not yet been connected.
 bool createDataServerPipe(bool write,
                           std::wstring kind,
@@ -95,7 +190,12 @@ bool createDataServerPipe(bool write,
 
   name = L"\\\\.\\pipe\\" + pipeName + L"-" + kind;
 
-  const DWORD winOpenMode =  PIPE_ACCESS_INBOUND | PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE/*  | FILE_FLAG_OVERLAPPED */;
+  DWORD winOpenMode;
+  if (write) {
+    winOpenMode = PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE;
+  } else {
+    winOpenMode = PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE;
+  }
 
   SECURITY_ATTRIBUTES sa = {};
   sa.nLength = sizeof(sa);
@@ -160,7 +260,7 @@ HRESULT CreateNamedPipesAndPseudoConsole(COORD size,
   return HRESULT_FROM_WIN32(GetLastError());
 }
 
-static ERL_NIF_TERM expty_start_process(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   // file, cols, rows, debug, pipeName, inheritCursor
   ERL_NIF_TERM erl_ret;
 
@@ -222,7 +322,7 @@ static ERL_NIF_TERM expty_start_process(ErlNifEnv *env, int argc, const ERL_NIF_
     }
     process = enif_self(env, process);
 
-    ptyHandles.insert(ptyHandles.end(), new pty_baton(env, process, ptyId, hIn, hOut, hpc));
+    ptyHandles.insert(ptyHandles.end(), new pty_baton(env, process, ptyId, hIn, hOut, hpc, inName, outName));
 
     std::string coninPipeNameStr = std::wstring_convert<std::codecvt_utf8<wchar_t>>().to_bytes(inName);
     std::string conoutPipeNameStr = std::wstring_convert<std::codecvt_utf8<wchar_t>>().to_bytes(outName);
@@ -246,6 +346,191 @@ static ERL_NIF_TERM expty_start_process(ErlNifEnv *env, int argc, const ERL_NIF_
   return erl_ret;
 }
 
+static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  // _pty_id, _file, _args, _cwd, _env
+  ERL_NIF_TERM erl_ret;
+
+  int pty_id;
+  std::string file;
+  std::vector<std::string> args;
+  std::string cwd;
+  std::vector<std::string> env_strings;
+
+  BOOL fSuccess = FALSE;
+
+  if (nif::get(env, argv[0], &pty_id) &&
+      nif::get(env, argv[1], file) &&
+      nif::get_list(env, argv[2], args) &&
+      nif::get(env, argv[3], cwd) &&
+      nif::get_env(env, argv[4], env_strings)) {
+    // Fetch pty handle from ID and start process
+    pty_baton* handle = get_pty_baton(pty_id);
+    if (!handle) {
+      erl_ret = nif::error(env, "Invalid pty handle");
+      return erl_ret;
+    }
+
+    // TODO: make full cmdline
+    std::wstring cmdline(path_util::to_wstring(file));
+    std::wstring cwd_w(path_util::to_wstring(cwd));
+
+    // Prepare command line
+    std::unique_ptr<wchar_t[]> mutableCommandline = std::make_unique<wchar_t[]>(cmdline.length() + 1);
+    HRESULT hr = StringCchCopyW(mutableCommandline.get(), cmdline.length() + 1, cmdline.c_str());
+
+    // Prepare cwd
+    std::unique_ptr<wchar_t[]> mutableCwd = std::make_unique<wchar_t[]>(cwd_w.length() + 1);
+    hr = StringCchCopyW(mutableCwd.get(), cwd_w.length() + 1, cwd_w.c_str());
+
+    // Prepare environment
+    std::wstring env_w;
+    if (env_strings.size()) {
+      std::wstringstream envBlock;
+      for(uint32_t i = 0; i < env_strings.size(); i++) {
+        std::wstring envValue(path_util::to_wstring(env_strings[i]));
+        envBlock << envValue << L'\0';
+      }
+      envBlock << L'\0';
+      env_w = envBlock.str();
+    }
+    auto envV = vectorFromString(env_w);
+    LPWSTR envArg = envV.empty() ? nullptr : envV.data();
+
+    uv_mutex_init(&handle->mutex);
+    uv_thread_create(&handle->tid, create_write_pipe, static_cast<void*>(handle));
+    ConnectNamedPipe(handle->hIn, nullptr);
+    uv_thread_create(&handle->tid, read_data, static_cast<void*>(handle));
+    ConnectNamedPipe(handle->hOut, nullptr);
+
+    // Attach the pseudoconsole to the client application we're creating
+    STARTUPINFOEXW siEx{0};
+    siEx.StartupInfo.cb = sizeof(STARTUPINFOEXW);
+    siEx.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+    siEx.StartupInfo.hStdError = nullptr;
+    siEx.StartupInfo.hStdInput = nullptr;
+    siEx.StartupInfo.hStdOutput = nullptr;
+
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    BYTE *attrList = new BYTE[size];
+    siEx.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attrList);
+
+    fSuccess = InitializeProcThreadAttributeList(siEx.lpAttributeList, 1, 0, &size);
+    if (!fSuccess) {
+      erl_ret = nif::error(env, "InitializeProcThreadAttributeList failed");
+    }
+    fSuccess = UpdateProcThreadAttribute(siEx.lpAttributeList,
+                                        0,
+                                        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                                        handle->hpc,
+                                        sizeof(HPCON),
+                                        NULL,
+                                        NULL);
+
+    if (!fSuccess) {
+      erl_ret = nif::error(env, "UpdateProcThreadAttribute failed");
+      return erl_ret;
+    }
+
+    PROCESS_INFORMATION piClient{};
+    fSuccess = !!CreateProcessW(
+        nullptr,
+        mutableCommandline.get(),
+        nullptr,                      // lpProcessAttributes
+        nullptr,                      // lpThreadAttributes
+        false,                        // bInheritHandles VERY IMPORTANT that this is false
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, // dwCreationFlags
+        envArg,                       // lpEnvironment
+        mutableCwd.get(),             // lpCurrentDirectory
+        &siEx.StartupInfo,            // lpStartupInfo
+        &piClient                     // lpProcessInformation
+    );
+    if (!fSuccess) {
+      erl_ret = nif::error(env, "Cannot create process");
+      return erl_ret;
+    }
+
+    // Update handle
+    handle->hShell = piClient.hProcess;
+    handle->async.data = handle;
+
+    // Setup OnProcessExit callback
+    uv_async_init(uv_default_loop(), &handle->async, OnProcessExit);
+
+    // Setup Windows wait for process exit event
+    RegisterWaitForSingleObject(&handle->hWait, piClient.hProcess, OnProcessExitWinEvent, (PVOID)handle, INFINITE, WT_EXECUTEONLYONCE);
+    
+    // Return
+    return enif_make_tuple2(env, nif::atom(env, "ok"), enif_make_int64(env, piClient.dwProcessId));
+  } else {
+    return enif_make_badarg(env);
+  }
+}
+
+static ERL_NIF_TERM expty_write(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  int pty_id;
+  ERL_NIF_TERM erl_ret;
+
+  if (nif::get(env, argv[0], &pty_id)) {
+    // Fetch pty handle from ID and start process
+    pty_baton* handle = get_pty_baton(pty_id);
+    if (!handle) {
+      erl_ret = nif::error(env, "Invalid pty handle");
+      return erl_ret;
+    }
+  
+    ErlNifBinary erl_bin;
+    DWORD nbytes = 0;
+    if (enif_inspect_binary(env, argv[1], &erl_bin)) {
+      nbytes = handle->write(erl_bin.data, erl_bin.size);
+    } else if (enif_inspect_iolist_as_binary(env, argv[1], &erl_bin)) {
+      nbytes = handle->write(erl_bin.data, erl_bin.size);
+    } else {
+      return nif::error(env, "ExPTY.write/2 expects the second argument to be binary or iovec(s)");
+    }
+
+    if (nbytes == erl_bin.size) {
+      erl_ret = nif::atom(env, "ok");
+    } else {
+      erl_ret = enif_make_tuple2(env, nif::atom(env, "partial"), enif_make_int64(env, nbytes));
+    }
+  } else {
+    erl_ret = nif::error(env, "Cannot get pipesocket resource");
+  }
+  return erl_ret;
+}
+
+static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  int pty_id, cols, rows;
+
+  if (nif::get(env, argv[0], &pty_id) &&
+      nif::get(env, argv[1], &cols) && cols > 0 &&
+      nif::get(env, argv[2], &rows) && rows > 0) {
+    const pty_baton* handle = get_pty_baton(pty_id);
+
+    if (handle != nullptr) {
+      HANDLE hLibrary = LoadLibraryExW(L"kernel32.dll", 0, 0);
+      bool fLoadedDll = hLibrary != nullptr;
+      if (fLoadedDll) {
+        PFNRESIZEPSEUDOCONSOLE const pfnResizePseudoConsole = (PFNRESIZEPSEUDOCONSOLE)GetProcAddress((HMODULE)hLibrary, "ResizePseudoConsole");
+        if (pfnResizePseudoConsole) {
+          COORD size = {cols, rows};
+          pfnResizePseudoConsole(handle->hpc, size);
+          return nif::atom(env, "ok");
+        } else {
+          return nif::error(env, "cannot find function ResizePseudoConsole");
+        }
+      } else {
+        return nif::error(env, "cannot load kernel32.dll");
+      }
+    } else {
+      return nif::error(env, "invalid pty handle");
+    }
+  } else {
+    return enif_make_badarg(env);
+  }
+}
+
 VOID CALLBACK OnProcessExitWinEvent(
     _In_ PVOID context,
     _In_ BOOLEAN TimerOrWaitFired) {
@@ -255,8 +540,7 @@ VOID CALLBACK OnProcessExitWinEvent(
   uv_async_send(&baton->async);
 }
 
-static void OnProcessExit(uv_async_t *async) {
-  // Nan::HandleScope scope;
+void OnProcessExit(uv_async_t *async) {
   pty_baton *baton = static_cast<pty_baton*>(async->data);
 
   UnregisterWait(baton->hWait);
@@ -265,170 +549,17 @@ static void OnProcessExit(uv_async_t *async) {
   DWORD exitCode = 0;
   GetExitCodeProcess(baton->hShell, &exitCode);
 
-  // // Call function
-  // v8::Local<v8::Value> args[1] = {
-  //   Nan::New<v8::Number>(exitCode)
-  // };
+  ErlNifEnv * msg_env = enif_alloc_env();
+  enif_send(NULL, baton->process, msg_env, enif_make_tuple2(msg_env,
+    nif::atom(msg_env, "exit"),
+    enif_make_int(msg_env, exitCode)
+  ));
+  enif_free_env(msg_env);
 
-  // Nan::AsyncResource asyncResource("node-pty.callback");
-  // baton->cb.Call(1, args, &asyncResource);
-  // // Clean up
-  // baton->cb.Reset();
+  uv_mutex_destroy(&baton->mutex);
+  enif_free(baton->process);
+  baton->process = NULL;
 }
-
-// static NAN_METHOD(PtyConnect) {
-//   Nan::HandleScope scope;
-
-//   // If we're working with conpty's we need to call ConnectNamedPipe here AFTER
-//   //    the Socket has attempted to connect to the other end, then actually
-//   //    spawn the process here.
-
-//   std::stringstream errorText;
-//   BOOL fSuccess = FALSE;
-
-//   if (info.Length() != 5 ||
-//       !info[0]->IsNumber() ||
-//       !info[1]->IsString() ||
-//       !info[2]->IsString() ||
-//       !info[3]->IsArray() ||
-//       !info[4]->IsFunction()) {
-//     Nan::ThrowError("Usage: pty.connect(id, cmdline, cwd, env, exitCallback)");
-//     return;
-//   }
-
-//   const int id = info[0]->Int32Value(Nan::GetCurrentContext()).FromJust();
-//   const std::wstring cmdline(path_util::to_wstring(Nan::Utf8String(info[1])));
-//   const std::wstring cwd(path_util::to_wstring(Nan::Utf8String(info[2])));
-//   const v8::Local<v8::Array> envValues = info[3].As<v8::Array>();
-//   const v8::Local<v8::Function> exitCallback = v8::Local<v8::Function>::Cast(info[4]);
-
-//   // Fetch pty handle from ID and start process
-//   pty_baton* handle = get_pty_baton(id);
-//   if (!handle) {
-//     Nan::ThrowError("Invalid pty handle");
-//     return;
-//   }
-
-//   // Prepare command line
-//   std::unique_ptr<wchar_t[]> mutableCommandline = std::make_unique<wchar_t[]>(cmdline.length() + 1);
-//   HRESULT hr = StringCchCopyW(mutableCommandline.get(), cmdline.length() + 1, cmdline.c_str());
-
-//   // Prepare cwd
-//   std::unique_ptr<wchar_t[]> mutableCwd = std::make_unique<wchar_t[]>(cwd.length() + 1);
-//   hr = StringCchCopyW(mutableCwd.get(), cwd.length() + 1, cwd.c_str());
-
-//   // Prepare environment
-//   std::wstring env;
-//   if (!envValues.IsEmpty()) {
-//     std::wstringstream envBlock;
-//     for(uint32_t i = 0; i < envValues->Length(); i++) {
-//       std::wstring envValue(path_util::to_wstring(Nan::Utf8String(Nan::Get(envValues, i).ToLocalChecked())));
-//       envBlock << envValue << L'\0';
-//     }
-//     envBlock << L'\0';
-//     env = envBlock.str();
-//   }
-//   auto envV = vectorFromString(env);
-//   LPWSTR envArg = envV.empty() ? nullptr : envV.data();
-
-//   ConnectNamedPipe(handle->hIn, nullptr);
-//   ConnectNamedPipe(handle->hOut, nullptr);
-
-//   // Attach the pseudoconsole to the client application we're creating
-//   STARTUPINFOEXW siEx{0};
-//   siEx.StartupInfo.cb = sizeof(STARTUPINFOEXW);
-//   siEx.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
-//   siEx.StartupInfo.hStdError = nullptr;
-//   siEx.StartupInfo.hStdInput = nullptr;
-//   siEx.StartupInfo.hStdOutput = nullptr;
-
-//   SIZE_T size = 0;
-//   InitializeProcThreadAttributeList(NULL, 1, 0, &size);
-//   BYTE *attrList = new BYTE[size];
-//   siEx.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attrList);
-
-//   fSuccess = InitializeProcThreadAttributeList(siEx.lpAttributeList, 1, 0, &size);
-//   if (!fSuccess) {
-//     return throwNanError(&info, "InitializeProcThreadAttributeList failed", true);
-//   }
-//   fSuccess = UpdateProcThreadAttribute(siEx.lpAttributeList,
-//                                        0,
-//                                        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-//                                        handle->hpc,
-//                                        sizeof(HPCON),
-//                                        NULL,
-//                                        NULL);
-//   if (!fSuccess) {
-//     return throwNanError(&info, "UpdateProcThreadAttribute failed", true);
-//   }
-
-//   PROCESS_INFORMATION piClient{};
-//   fSuccess = !!CreateProcessW(
-//       nullptr,
-//       mutableCommandline.get(),
-//       nullptr,                      // lpProcessAttributes
-//       nullptr,                      // lpThreadAttributes
-//       false,                        // bInheritHandles VERY IMPORTANT that this is false
-//       EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, // dwCreationFlags
-//       envArg,                       // lpEnvironment
-//       mutableCwd.get(),             // lpCurrentDirectory
-//       &siEx.StartupInfo,            // lpStartupInfo
-//       &piClient                     // lpProcessInformation
-//   );
-//   if (!fSuccess) {
-//     return throwNanError(&info, "Cannot create process", true);
-//   }
-
-//   // Update handle
-//   handle->hShell = piClient.hProcess;
-//   handle->cb.Reset(exitCallback);
-//   handle->async.data = handle;
-
-//   // Setup OnProcessExit callback
-//   uv_async_init(uv_default_loop(), &handle->async, OnProcessExit);
-
-//   // Setup Windows wait for process exit event
-//   RegisterWaitForSingleObject(&handle->hWait, piClient.hProcess, OnProcessExitWinEvent, (PVOID)handle, INFINITE, WT_EXECUTEONLYONCE);
-
-//   // Return
-//   v8::Local<v8::Object> marshal = Nan::New<v8::Object>();
-//   Nan::Set(marshal, Nan::New<v8::String>("pid").ToLocalChecked(), Nan::New<v8::Number>(piClient.dwProcessId));
-//   info.GetReturnValue().Set(marshal);
-// }
-
-// static NAN_METHOD(PtyResize) {
-//   Nan::HandleScope scope;
-
-//   if (info.Length() != 3 ||
-//       !info[0]->IsNumber() ||
-//       !info[1]->IsNumber() ||
-//       !info[2]->IsNumber()) {
-//     Nan::ThrowError("Usage: pty.resize(id, cols, rows)");
-//     return;
-//   }
-
-//   int id = info[0]->Int32Value(Nan::GetCurrentContext()).FromJust();
-//   SHORT cols = info[1]->Uint32Value(Nan::GetCurrentContext()).FromJust();
-//   SHORT rows = info[2]->Uint32Value(Nan::GetCurrentContext()).FromJust();
-
-//   const pty_baton* handle = get_pty_baton(id);
-
-//   if (handle != nullptr) {
-//     HANDLE hLibrary = LoadLibraryExW(L"kernel32.dll", 0, 0);
-//     bool fLoadedDll = hLibrary != nullptr;
-//     if (fLoadedDll)
-//     {
-//       PFNRESIZEPSEUDOCONSOLE const pfnResizePseudoConsole = (PFNRESIZEPSEUDOCONSOLE)GetProcAddress((HMODULE)hLibrary, "ResizePseudoConsole");
-//       if (pfnResizePseudoConsole)
-//       {
-//         COORD size = {cols, rows};
-//         pfnResizePseudoConsole(handle->hpc, size);
-//       }
-//     }
-//   }
-
-//   return info.GetReturnValue().SetUndefined();
-// }
 
 // static NAN_METHOD(PtyKill) {
 //   Nan::HandleScope scope;
@@ -470,10 +601,6 @@ static void OnProcessExit(uv_async_t *async) {
 */
 
 static int on_load(ErlNifEnv * env, void **, ERL_NIF_TERM) {
-  // ErlNifResourceType *rt;
-  // rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", NULL, ERL_NIF_RT_CREATE, NULL);
-  // if (!rt) return -1;
-  // pty_pipesocket::type = rt;
   return 0;
 }
 
@@ -486,7 +613,10 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 }
 
 static ErlNifFunc nif_functions[] = {
-  {"start_process", 6, expty_start_process, ERL_NIF_DIRTY_JOB_IO_BOUND}
+  {"spawn", 6, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"priv_connect", 5, expty_pty_connect, ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
 ERL_NIF_INIT(Elixir.ExPTY.Nif, nif_functions, on_load, on_reload, on_upgrade, NULL);
