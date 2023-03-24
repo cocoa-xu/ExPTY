@@ -26,7 +26,7 @@ $(LIBUV_A): $(PRIV_DIR)
 		mkdir -p "$(LIBUV_BUILD_DIR)" && \
 		mkdir -p "$(NIF_BUILD_DIR)" && \
 		cd "$(LIBUV_BUILD_DIR)" && \
-		cmake "$(LIBUV_SRC)" -D CMAKE_INSTALL_PREFIX="$(LIBUV_INSTALL_DIR)" && \
+		cmake "$(LIBUV_SRC)" -D CMAKE_INSTALL_PREFIX="$(LIBUV_INSTALL_DIR)" -D CMAKE_C_FLAGS="-fPIC" -D CMAKE_CXX_FLAGS="-fPIC" && \
 		cmake --build . $(MAKE_BUILD_FLAGS) && \
 		cmake --install . ; \
 	fi
