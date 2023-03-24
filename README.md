@@ -73,7 +73,9 @@ end
 For Unix systems it's pretty much what you would expect, a working C/C++ toolchain, CMake, Make.
 
 ### Windows
-For Windows users, if you're not using Livebook, it's also the same as installing any other NIF libraries. However, if you're trying to install it on a Livebook, you need to set up some environment variables. 
+For Windows users, if you're not using Livebook, it's also the same as installing any other NIF libraries. 
+  
+**However, if you're trying to install it on a Livebook, you need to set up some environment variables.**
 
 Normally, these environment variables would be by `vcvarsall.bat` in your cmd (or powershell, or any other shell), but here we have to do it manually:
 
