@@ -241,7 +241,7 @@ case :os.type() do
 
       defp args_to_command_line_impl([arg | argv], result) when is_binary(arg) do
         arg0 =  String.at(arg, 0)
-        has_lopsided_enclosing_quote = Bitwise.bxor(arg0 != "\"", !String.ends_with?(arg, "\""))
+        has_lopsided_enclosing_quote = xor(arg0 != "\"", !String.ends_with?(arg, "\""))
         has_no_eclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
         quote? = arg == "" || (:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) && ((String.length(arg) > 0) && (has_lopsided_enclosing_quote || has_no_eclosing_quotes))
         result =
@@ -290,6 +290,10 @@ case :os.type() do
 
       defp repeat_text_impl(text, count, result) when count > 0 do
         repeat_text_impl(text, count - 1, [text | result])
+      end
+
+      defp xor(a, b) when is_binary(a) and is_boolean(b) do
+        (a && !b) || (!a && b)
       end
     end
 
