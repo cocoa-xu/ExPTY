@@ -613,7 +613,7 @@ static ErlNifFunc nif_functions[] = {
   {"spawn", 6, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
-  {"priv_connect", 5, expty_pty_connect, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"priv_connect", 4, expty_pty_connect, ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
 ERL_NIF_INIT(Elixir.ExPTY.Nif, nif_functions, on_load, on_reload, on_upgrade, NULL);
