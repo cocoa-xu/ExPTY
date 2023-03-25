@@ -292,7 +292,7 @@ case :os.type() do
         repeat_text_impl(text, count - 1, [text | result])
       end
 
-      defp xor(a, b) when is_binary(a) and is_boolean(b) do
+      defp xor(a, b) when is_boolean(a) and is_boolean(b) do
         (a && !b) || (!a && b)
       end
     end
