@@ -246,7 +246,7 @@ case :os.type() do
         quote? = arg == "" || (:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) && ((String.length(arg) > 0) && (has_lopsided_enclosing_quote || has_no_eclosing_quotes))
         result =
           if quote? do
-            result = "#{result}\""
+            "#{result}\""
           else
             result
           end
@@ -270,7 +270,7 @@ case :os.type() do
           if quote? do
             "#{result}#{repeat_text("\\", bs_count * 2)}\""
           else
-            "#{result}#{repeat_text("\\", bs_count_)}"
+            "#{result}#{repeat_text("\\", bs_count)}"
           end
 
         args_to_command_line_impl(argv, result)
@@ -284,7 +284,7 @@ case :os.type() do
         repeat_text_impl(text, count, [])
       end
 
-      defp repeat_text_impl(text, count, result) when count <= 0 do
+      defp repeat_text_impl(_text, count, result) when count <= 0 do
         IO.iodata_to_binary(result)
       end
 
