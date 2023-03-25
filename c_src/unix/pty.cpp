@@ -495,6 +495,10 @@ static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _er
   ).c_str());
 }
 
+static ERL_NIF_TERM expty_stub(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  return nif::error(env, "invalid NIF call to platform-specific implementation");
+}
+
 /**
  * Nonblocking FD
  */
@@ -730,12 +734,16 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 }
 
 static ErlNifFunc nif_functions[] = {
-  {"spawn", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"kill", 2, expty_kill, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"pause", 1, expty_pause, ERL_DIRTY_JOB_IO_BOUND},
-  {"resume", 1, expty_resume, ERL_DIRTY_JOB_IO_BOUND}
+  {"resume", 1, expty_resume, ERL_DIRTY_JOB_IO_BOUND},
+
+  // stubs
+  {"spawn_win32", 6, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"connect_win32", 4, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
 ERL_NIF_INIT(Elixir.ExPTY.Nif, nif_functions, on_load, on_reload, on_upgrade, NULL);
