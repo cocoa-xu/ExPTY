@@ -351,18 +351,16 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
   ERL_NIF_TERM erl_ret;
 
   int pty_id;
-  std::string file;
-  std::vector<std::string> args;
+  std::string cmdline;
   std::string cwd;
   std::vector<std::string> env_strings;
 
   BOOL fSuccess = FALSE;
 
   if (nif::get(env, argv[0], &pty_id) &&
-      nif::get(env, argv[1], file) &&
-      nif::get_list(env, argv[2], args) &&
-      nif::get(env, argv[3], cwd) &&
-      nif::get_env(env, argv[4], env_strings)) {
+      nif::get(env, argv[1], cmdline) &&
+      nif::get(env, argv[2], cwd) &&
+      nif::get_env(env, argv[3], env_strings)) {
     // Fetch pty handle from ID and start process
     pty_baton* handle = get_pty_baton(pty_id);
     if (!handle) {
@@ -370,13 +368,12 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
       return erl_ret;
     }
 
-    // TODO: make full cmdline
-    std::wstring cmdline(path_util::to_wstring(file));
+    std::wstring cmdline_w(path_util::to_wstring(cmdline));
     std::wstring cwd_w(path_util::to_wstring(cwd));
 
     // Prepare command line
-    std::unique_ptr<wchar_t[]> mutableCommandline = std::make_unique<wchar_t[]>(cmdline.length() + 1);
-    HRESULT hr = StringCchCopyW(mutableCommandline.get(), cmdline.length() + 1, cmdline.c_str());
+    std::unique_ptr<wchar_t[]> mutableCommandline = std::make_unique<wchar_t[]>(cmdline_w.length() + 1);
+    HRESULT hr = StringCchCopyW(mutableCommandline.get(), cmdline_w.length() + 1, cmdline_w.c_str());
 
     // Prepare cwd
     std::unique_ptr<wchar_t[]> mutableCwd = std::make_unique<wchar_t[]>(cwd_w.length() + 1);

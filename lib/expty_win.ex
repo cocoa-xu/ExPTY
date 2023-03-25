@@ -147,7 +147,8 @@ case :os.type() do
           ) do
         case ExPTY.Nif.spawn(file, cols, rows, debug, pipe_name, inherit_cursor) do
           {pty_id, conin, conout} when is_integer(pty_id) ->
-            case ExPTY.Nif.priv_connect(pty_id, file, args, cwd, env) do
+            command_line = args_to_command_line(file, args)
+            case ExPTY.Nif.priv_connect(pty_id, command_line, cwd, env) do
               {:ok, inner_pid} ->
                 {:reply, :ok, %T{
                   pty: pty_id,
@@ -225,11 +226,61 @@ case :os.type() do
 
         {:noreply, state}
       end
+
+      @doc """
+      Convert argc/argv into a Win32 command-line following the escaping convention
+      documented on MSDN (e.g. see CommandLineToArgvW documentation). Copied from
+      winpty and node-pty project.
+      """
+      def args_to_command_line(file, args) do
+        argv = [file | args]
+        args_to_command_line_impl(argv, "")
+      end
+
+      defp args_to_command_line_impl([], result), do: result
+
+      defp args_to_command_line_impl([arg | argv], result) when is_binary(arg) do
+        arg0 =  String.at(arg, 0)
+        has_lopsided_enclosing_quote = Bitwise.bxor(arg0 != "\"", !String.ends_with?(arg, "\""))
+        has_no_eclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
+        quote? = arg == "" || (:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) && ((String.length(arg) > 0) && (has_lopsided_enclosing_quote || has_no_eclosing_quotes))
+        result =
+          if quote? do
+            result = "#{result}\""
+          else
+            result
+          end
+
+        bs_count = 0
+        {bs_count, result} =
+          Enum.reduce(0..String.length(arg)-1, {bs_count, result}, fn index, {bs_count_, result_} ->
+            case String.at(arg, index) do
+              "\\" ->
+                {bs_count_ + 1, result_}
+              "\"" ->
+                result_ = "#{result_}#{repeat_text("\\", bs_count_ * 2 + 1)}\""
+                {0, result_}
+              p ->
+                result_ = "#{result_}#{repeat_text("\\", bs_count_)}#{p}"
+                {0, result_}
+            end
+          end)
+
+        result =
+          if quote? do
+            "#{result}#{repeat_text("\\", bs_count * 2)}\""
+          else
+            "#{result}#{repeat_text("\\", bs_count_)}"
+          end
+
+        args_to_command_line_impl(argv, result)
+      end
     end
 
   platform ->
     defmodule ExPTY.Win do
       @platform platform
+      @spec spawn(any, any, any) :: none
       def spawn(_file, _args, _pty_options) do
         raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
       end
