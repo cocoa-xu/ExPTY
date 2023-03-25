@@ -275,6 +275,22 @@ case :os.type() do
 
         args_to_command_line_impl(argv, result)
       end
+
+      defp repeat_text(_text, count) when count < 0 do
+        ""
+      end
+
+      defp repeat_text(text, count) when count >= 0 do
+        repeat_text_impl(text, count, [])
+      end
+
+      defp repeat_text_impl(text, count, result) when count <= 0 do
+        IO.iodata_to_binary(result)
+      end
+
+      defp repeat_text_impl(text, count, result) when count > 0 do
+        repeat_text_impl(text, count - 1, [text | result])
+      end
     end
 
   platform ->
