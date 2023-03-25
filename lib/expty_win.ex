@@ -234,12 +234,19 @@ case :os.type() do
       """
       def args_to_command_line(file, args) do
         argv = [file | args]
-        args_to_command_line_impl(argv, "")
+        args_to_command_line_impl(argv, 0, "")
       end
 
-      defp args_to_command_line_impl([], result), do: result
+      defp args_to_command_line_impl([], _index, result), do: result
 
-      defp args_to_command_line_impl([arg | argv], result) when is_binary(arg) do
+      defp args_to_command_line_impl([arg | argv], index, result) when is_binary(arg) do
+        result =
+          if index > 0 do
+            "#{result} "
+          else
+            result
+          end
+
         arg0 =  String.at(arg, 0)
         has_lopsided_enclosing_quote = xor(arg0 != "\"", !String.ends_with?(arg, "\""))
         has_no_eclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
@@ -273,7 +280,7 @@ case :os.type() do
             "#{result}#{repeat_text("\\", bs_count)}"
           end
 
-        args_to_command_line_impl(argv, result)
+        args_to_command_line_impl(argv, index + 1, result)
       end
 
       defp repeat_text(_text, count) when count < 0 do
