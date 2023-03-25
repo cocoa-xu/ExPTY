@@ -33,7 +33,7 @@ defmodule ExPTY.Nif do
       def resize(_pty_id, _cols, _rows),
         do: :erlang.nif_error(:not_loaded)
 
-      def priv_connect(_pty_id, _file, _args, _cwd, _env),
+      def priv_connect(_pty_id, _command_line, _cwd, _env),
         do: :erlang.nif_error(:not_loaded)
 
     _ ->

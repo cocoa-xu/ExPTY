@@ -10,6 +10,10 @@ case :os.type() do
           raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
         end
 
+        def kill(_pty, _signal) do
+          raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
+        end
+
         def on_data(_pty, _callback) do
           raise "Invalid call to platform-specific module `#{inspect(__MODULE__)}` while on #{inspect(@platform)} platform"
         end
