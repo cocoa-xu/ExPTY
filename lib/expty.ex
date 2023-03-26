@@ -1,4 +1,12 @@
 defmodule ExPTY do
+  @moduledoc """
+  `forkpty(3)` bindings for Elixir.
+
+  This allows you to fork processes with pseudoterminal file descriptors.
+
+  It returns a terminal genserver which allows reads and writes.
+  """
+
   use GenServer
 
   defstruct [
