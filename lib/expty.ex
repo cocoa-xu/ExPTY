@@ -1,4 +1,12 @@
 defmodule ExPTY do
+  @moduledoc """
+  `forkpty(3)` bindings for Elixir.
+
+  This allows you to fork processes with pseudoterminal file descriptors.
+
+  It returns a terminal genserver which allows reads and writes.
+  """
+
   use GenServer
 
   defstruct [
@@ -23,6 +31,11 @@ defmodule ExPTY do
 
   alias __MODULE__, as: T
 
+  @doc """
+  Default options when spawning a process.
+
+  Please see `ExPTY.spawn/3` for details.
+  """
   @spec default_pty_options() :: Keyword.t()
   def default_pty_options do
     default_pty_options_impl(:os.type())
@@ -35,32 +48,161 @@ defmodule ExPTY do
       rows: Application.get_env(:expty, :rows, 24),
       env: Application.get_env(:expty, :env, System.get_env()),
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
+      on_data: nil,
+      on_exit: nil,
       encoding: Application.get_env(:expty, :encoding, "utf-8"),
       handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
       flow_control_pause: Application.get_env(:expty, :flow_control_pause, "\x13"),
       flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11"),
-      on_data: nil,
-      on_exit: nil
     ]
   end
 
   defp default_pty_options_impl({:win32, _}) do
     [
       name: Application.get_env(:expty, :name, "Windows Shell"),
-      file: Application.get_env(:expty, :file, "powershell.exe"),
       cols: Application.get_env(:expty, :cols, 80),
       rows: Application.get_env(:expty, :rows, 24),
-      debug: Application.get_env(:expty, :debug, false),
-      pipe_name: Application.get_env(:expty, :pipe_name, "pipe"),
-      inherit_cursor: Application.get_env(:expty, :inherit_cursor, false),
       env: Application.get_env(:expty, :env, System.get_env()),
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
       on_exit: nil
+      debug: Application.get_env(:expty, :debug, false),
+      pipe_name: Application.get_env(:expty, :pipe_name, "pipe"),
+      inherit_cursor: Application.get_env(:expty, :inherit_cursor, false),
     ]
   end
 
-  @spec spawn(binary, [binary], keyword) :: {:error, String.t()} | {:ok, pid}
+  @doc """
+  Forks a process as a pseudoterminal.
+
+  ##### Positional Paramters
+  - `file`: `String.t()`
+
+    The file to launch.
+
+  - `args`: `list(String.t())`
+
+    The file's arguments as argv (const char * []).
+
+  ##### Keyword Parameters
+  ##### Common Keyword Parameters (Unix & Windows)
+  - `name`: `String.t()`
+
+    Terminal name.
+
+    Defaults to `xterm-color` on Unix systems and `Windows Shell` on Windows.
+
+  - `cols`: `pos_integer()`
+
+    Number of columns.
+
+    Defaults to 80.
+
+  - `rows`: `pos_integer()`
+
+    Number of rows.
+
+    Defaults to 24.
+
+  - `env`: `%{String.t() => String.t()}`
+
+    Environment variables.
+
+    Defaults to `System.get_env()`.
+
+    Notice, as the default value is given by `System.get_env()`, therefore, please be careful of leaking
+    secrets set in the environment.
+
+  - `cwd`: `String.t()`
+
+    Current working directory.
+
+    Defaults to `Path.expand("~")`.
+
+  - `on_data`: `(ExPTY, pid(), binary() -> term()) | atom`
+
+    Callback when data is available.
+
+    Defaults to `nil`.
+
+    When passing a function, the function should expect 3 arguments,
+
+      1. `ExPTY`: The module name of `ExPTY`. This will probably be removed in the first release.
+      2. `pid()`: The genserver pid so that you can reuse the same function for different processes spawned.
+      3. `binary()`: The data read from the spawned process.
+
+    When passing a module name, the module should export an `on_data/3` function,
+    this function should expect the same arguments as mentioned above.
+
+    The return value of this callback function is ignored.
+
+  - `on_exit`: `(ExPTY, pid(), integer(), integer() | nil -> term()) | atom`
+
+    Callback when the spawned process exited.
+
+    Defaults to `nil`.
+
+    When passing a function, the function should expect 4 arguments,
+
+      1. `ExPTY`: The module name of `ExPTY`. This will probably be removed in the first release.
+      2. `pid()`: The genserver pid so that you can reuse the same function for different processes spawned.
+      3. `integer()`: The exit code the spawned process.
+      4. `integer() | nil`: On unix, this is the signal code from the spawned process. On Windows, this value
+        is `nil`.
+
+    When passing a module name, the module should export an `on_data/3` function,
+    this function should expect the same arguments as mentioned above.
+
+    The return value of this callback function is ignored.
+
+  ##### Unix-specific Keyword Parameters
+  - `encoding`: `String.t()`
+
+    Defaults to `utf-8`. This keyword parameter will probably be removed in the first release.
+
+  - `handle_flow_control`: `boolean()`
+
+    Defaults to `false`.
+
+    Toggle flow control.
+
+  - `flow_control_pause`: `binary()`
+
+    Default messages to indicate PAUSE for automatic flow control.
+
+    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+
+    Defaults to `\x13`, i.e, `XOFF`.
+
+  - `flow_control_resume`: `binary()`
+
+    Default messages to indicate RESUME for automatic flow control.
+
+    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+
+    Defaults to `\x11`, i.e, `XON`.
+
+  ##### Windows-specific Keyword Parameters
+  - `debug`: `boolean()`
+
+    Defaults to `false`. This keyword parameter is not used when the backend is conpty, i.e., when
+    Windows version >= 1809.
+
+  - `pipe_name`: `String.t()`
+
+    Prefix of the pipe name.
+
+    Defaults to `"pipe"`.
+
+  - `inherit_cursor`: `boolean()`
+
+    Whether to use PSEUDOCONSOLE_INHERIT_CURSOR in conpty.
+
+    See docs on [createpseudoconsole](https://docs.microsoft.com/en-us/windows/console/createpseudoconsole).
+
+    Defaults to `false`.
+  """
+  @spec spawn(String.t(), [String.t()], keyword) :: {:ok, pid} | {:error, String.t()}
   def spawn(file, args, opts \\ []) do
     case GenServer.start(__MODULE__, {file, args, opts}) do
       {:ok, pid} ->
@@ -73,16 +215,25 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Write data to the pseudoterminal.
+  """
   @spec write(pid, binary) :: :ok | {:error, String.t()} | {:partial, integer}
   def write(pty, data) do
     GenServer.call(pty, {:write, data})
   end
 
+  @doc """
+  Kill the process with given signal.
+  """
   @spec kill(pid, integer) :: :ok
   def kill(pty, signal) when is_integer(signal) do
     GenServer.call(pty, {:kill, signal})
   end
 
+  @doc """
+  Set callback function or module when data is available from the pseudoterminal.
+  """
   @spec on_data(pid(), atom | (ExPTY, pid(), binary() -> any)) :: :ok
   def on_data(pty, callback) when is_function(callback, 3) do
     GenServer.call(pty, {:update_on_data, {:func, callback}})
@@ -96,6 +247,9 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Set callback function or module when the process exited.
+  """
   @spec on_exit(pid(), atom() | (ExPTY, pid(), integer(), integer() | nil -> any)) :: :ok
   def on_exit(pty, callback) when is_function(callback, 4) do
     GenServer.call(pty, {:update_on_exit, {:func, callback}})
@@ -109,26 +263,41 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Resize the pseudoterminal.
+  """
   @spec resize(pid, pos_integer, pos_integer) :: :ok | {:error, String.t()}
   def resize(pty, cols, rows) when is_pid(pty) and is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
     GenServer.call(pty, {:resize, {cols, rows}})
   end
 
+  @doc """
+  Get flow control status (only available on Unix systems at the moment).
+  """
   @spec flow_control(pid) :: boolean()
   def flow_control(pty) when is_pid(pty) do
     GenServer.call(pty, :flow_control)
   end
 
+  @doc """
+  Set flow control status (only available on Unix systems at the moment).
+  """
   @spec flow_control(pid, boolean) :: :ok
   def flow_control(pty, enable?) when is_pid(pty) and is_boolean(enable?) do
     GenServer.call(pty, {:flow_control, enable?})
   end
 
+  @doc """
+  Pause flow (only available on Unix systems at the moment).
+  """
   @spec pause(pid) :: :ok
   def pause(pty) when is_pid(pty) do
     GenServer.call(pty, :pause)
   end
 
+  @doc """
+  Resume flow (only available on Unix systems at the moment).
+  """
   @spec resume(pid) :: :ok
   def resume(pty) when is_pid(pty) do
     GenServer.call(pty, :resume)
