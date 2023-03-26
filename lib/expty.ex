@@ -156,7 +156,43 @@ defmodule ExPTY do
 
     Defaults to `false`.
 
+    Toggle flow control.
 
+  - `flow_control_pause`: `binary()`
+
+    Default messages to indicate PAUSE for automatic flow control.
+
+    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+
+    Defaults to `\x13`, i.e, `XOFF`.
+
+  - `flow_control_resume`: `binary()`
+
+    Default messages to indicate RESUME for automatic flow control.
+
+    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+
+    Defaults to `\x11`, i.e, `XON`.
+
+  ##### Windows-specific Keyword Parameters
+  - `debug`: `boolean()`
+
+    Defaults to `false`. This keyword parameter is not used when the backend is conpty, i.e., when
+    Windows version >= 1809.
+
+  - `pipe_name`: `String.t()`
+
+    Prefix of the pipe name.
+
+    Defaults to `"pipe"`.
+
+  - `inherit_cursor`: `boolean()`
+
+    Whether to use PSEUDOCONSOLE_INHERIT_CURSOR in conpty.
+
+    See docs on [createpseudoconsole](https://docs.microsoft.com/en-us/windows/console/createpseudoconsole).
+
+    Defaults to `false`.
   """
   @spec spawn(String.t(), [String.t()], keyword) :: {:ok, pid} | {:error, String.t()}
   def spawn(file, args, opts \\ []) do
@@ -171,16 +207,25 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Write data to the pseudoterminal.
+  """
   @spec write(pid, binary) :: :ok | {:error, String.t()} | {:partial, integer}
   def write(pty, data) do
     GenServer.call(pty, {:write, data})
   end
 
+  @doc """
+  Kill the process with given signal.
+  """
   @spec kill(pid, integer) :: :ok
   def kill(pty, signal) when is_integer(signal) do
     GenServer.call(pty, {:kill, signal})
   end
 
+  @doc """
+  Set callback function or module when data is available from the pseudoterminal.
+  """
   @spec on_data(pid(), atom | (ExPTY, pid(), binary() -> any)) :: :ok
   def on_data(pty, callback) when is_function(callback, 3) do
     GenServer.call(pty, {:update_on_data, {:func, callback}})
@@ -194,6 +239,9 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Set callback function or module when the process exited.
+  """
   @spec on_exit(pid(), atom() | (ExPTY, pid(), integer(), integer() | nil -> any)) :: :ok
   def on_exit(pty, callback) when is_function(callback, 4) do
     GenServer.call(pty, {:update_on_exit, {:func, callback}})
@@ -207,26 +255,41 @@ defmodule ExPTY do
     end
   end
 
+  @doc """
+  Resize the pseudoterminal.
+  """
   @spec resize(pid, pos_integer, pos_integer) :: :ok | {:error, String.t()}
   def resize(pty, cols, rows) when is_pid(pty) and is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
     GenServer.call(pty, {:resize, {cols, rows}})
   end
 
+  @doc """
+  Get flow control status (only available on Unix systems at the moment).
+  """
   @spec flow_control(pid) :: boolean()
   def flow_control(pty) when is_pid(pty) do
     GenServer.call(pty, :flow_control)
   end
 
+  @doc """
+  Set flow control status (only available on Unix systems at the moment).
+  """
   @spec flow_control(pid, boolean) :: :ok
   def flow_control(pty, enable?) when is_pid(pty) and is_boolean(enable?) do
     GenServer.call(pty, {:flow_control, enable?})
   end
 
+  @doc """
+  Pause flow (only available on Unix systems at the moment).
+  """
   @spec pause(pid) :: :ok
   def pause(pty) when is_pid(pty) do
     GenServer.call(pty, :pause)
   end
 
+  @doc """
+  Resume flow (only available on Unix systems at the moment).
+  """
   @spec resume(pid) :: :ok
   def resume(pty) when is_pid(pty) do
     GenServer.call(pty, :resume)
