@@ -65,7 +65,7 @@ defmodule ExPTY do
       env: Application.get_env(:expty, :env, System.get_env()),
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
-      on_exit: nil
+      on_exit: nil,
       debug: Application.get_env(:expty, :debug, false),
       pipe_name: Application.get_env(:expty, :pipe_name, "pipe"),
       inherit_cursor: Application.get_env(:expty, :inherit_cursor, false),
