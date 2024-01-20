@@ -75,7 +75,11 @@ if(WIN32)
     )
     set_property(TARGET conpty_console_list PROPERTY CXX_STANDARD 14)
 else()
+    set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+    set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+    find_package(Threads REQUIRED)
     add_executable(spawn-helper ${expty_spawn_helper_src})
+    target_link_libraries(spawn-helper Threads::Threads)
     install(
         TARGETS spawn-helper
         RUNTIME DESTINATION "${PRIV_DIR}"
