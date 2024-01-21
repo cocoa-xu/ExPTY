@@ -123,6 +123,8 @@ static void pty_pipesocket_fn(void *data);
 static void pty_after_pipesocket(uv_async_t *);
 static void pty_after_close_pipesocket(uv_handle_t *);
 
+static std::map<pid_t, pty_pipesocket *> processes;
+
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
 
 static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
@@ -262,11 +264,14 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     posix_spawn_file_actions_adddup2(&acts, comms_pipe[1], COMM_PIPE_FD);
     posix_spawn_file_actions_addclose(&acts, comms_pipe[1]);
 
+    setpgid(0, 0);
+
     posix_spawnattr_t attrs;
     posix_spawnattr_init(&attrs);
     if (closeFDs) {
       flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
     }
+    flags |= POSIX_SPAWN_SETPGROUP;
     posix_spawnattr_setflags(&attrs, flags);
 
     pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
@@ -356,6 +361,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
       uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
       uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
+      processes[pid] = pipesocket;
     }
 done:
     posix_spawn_file_actions_destroy(&acts);
@@ -406,6 +412,7 @@ static ERL_NIF_TERM expty_kill(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
   if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket &&
       nif::get(env, argv[1], &signal) && signal > 0) {
     kill(pipesocket->baton->pid, signal);
+    processes.erase(pipesocket->baton->pid);
     erl_ret = nif::atom(env, "ok");
   } else {
     erl_ret = nif::error(env, "Cannot get pipesocket resource");
@@ -635,6 +642,7 @@ static void pty_waitpid(void *data) {
   baton->process = NULL;
 
   uv_async_send(&baton->async);
+  processes.erase(baton->pid);
 }
 
 /**
