@@ -266,14 +266,11 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     posix_spawn_file_actions_adddup2(&acts, comms_pipe[1], COMM_PIPE_FD);
     posix_spawn_file_actions_addclose(&acts, comms_pipe[1]);
 
-    setpgid(0, 0);
-
     posix_spawnattr_t attrs;
     posix_spawnattr_init(&attrs);
     if (closeFDs) {
       flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
     }
-    flags |= POSIX_SPAWN_SETPGROUP;
     posix_spawnattr_setflags(&attrs, flags);
 
     pipesocket = (pty_pipesocket *)enif_alloc_resource(pty_pipesocket::type, sizeof(pty_pipesocket));
