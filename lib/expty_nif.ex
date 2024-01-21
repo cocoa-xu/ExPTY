@@ -24,21 +24,23 @@ defmodule ExPTY.Nif do
   end
 
   def spawn_win32(_file, _cols, _rows, _debug, _pipe_name, _inherit_cursor),
-        do: :erlang.nif_error(:not_loaded)
+    do: :erlang.nif_error(:not_loaded)
 
   def spawn_unix(
-    _file,
-    _args,
-    _env,
-    _cwd,
-    _cols,
-    _rows,
-    _uid,
-    _gid,
-    _is_utf8,
-    _closeFDs,
-    _helperPath
-  ), do: :erlang.nif_error(:not_loaded)
+        _file,
+        _args,
+        _env,
+        _cwd,
+        _cols,
+        _rows,
+        _baudrate,
+        _uid,
+        _gid,
+        _is_utf8,
+        _closeFDs,
+        _helperPath
+      ),
+      do: :erlang.nif_error(:not_loaded)
 
   def connect_win32(_pty_id, _command_line, _cwd, _env),
     do: :erlang.nif_error(:not_loaded)

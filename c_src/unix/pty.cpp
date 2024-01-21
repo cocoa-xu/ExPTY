@@ -126,7 +126,7 @@ static void pty_after_close_pipesocket(uv_handle_t *);
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
 
 static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-  // file, args, env, cwd, cols, rows, uid, gid, is_utf8, closeFDs, helper_path
+  // file, args, env, cwd, cols, rows, baudrate, uid, gid, is_utf8, closeFDs, helper_path
   ERL_NIF_TERM erl_ret = nif::error(env, "error");
   std::string file;
   std::vector<std::string> args;
@@ -134,6 +134,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   std::string cwd;
   int cols, rows;
   int uid, gid;
+  int baudrate;
   bool is_utf8, closeFDs;
   std::string helper_path;
   if (nif::get(env, argv[0], file) &&
@@ -142,11 +143,12 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[3], cwd) &&
       nif::get(env, argv[4], &cols) && cols > 0 &&
       nif::get(env, argv[5], &rows) && rows > 0 &&
-      nif::get(env, argv[6], &uid) &&
-      nif::get(env, argv[7], &gid) &&
-      nif::get(env, argv[8], &is_utf8) &&
-      nif::get(env, argv[9], &closeFDs) &&
-      nif::get(env, argv[10], helper_path)) {
+      nif::get(env, argv[6], &baudrate) && baudrate >= 0 &&
+      nif::get(env, argv[7], &uid) &&
+      nif::get(env, argv[8], &gid) &&
+      nif::get(env, argv[9], &is_utf8) &&
+      nif::get(env, argv[10], &closeFDs) &&
+      nif::get(env, argv[11], helper_path)) {
 
     pty_pipesocket * pipesocket = NULL;
     ErlNifPid* process = NULL;
@@ -227,8 +229,8 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       argv[i + EXTRA_ARGS] = strdup(args[i].c_str());
     }
 
-    cfsetispeed(term, B38400);
-    cfsetospeed(term, B38400);
+    cfsetispeed(term, baudrate);
+    cfsetospeed(term, baudrate);
 
     sigset_t newmask, oldmask;
 
@@ -734,7 +736,7 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 }
 
 static ErlNifFunc nif_functions[] = {
-  {"spawn_unix", 11, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 12, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"kill", 2, expty_kill, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},

@@ -46,6 +46,7 @@ defmodule ExPTY do
       name: Application.get_env(:expty, :name, "xterm-color"),
       cols: Application.get_env(:expty, :cols, 80),
       rows: Application.get_env(:expty, :rows, 24),
+      baudrate: 115200,
       env: Application.get_env(:expty, :env, System.get_env()),
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
@@ -53,7 +54,7 @@ defmodule ExPTY do
       encoding: Application.get_env(:expty, :encoding, "utf-8"),
       handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
       flow_control_pause: Application.get_env(:expty, :flow_control_pause, "\x13"),
-      flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11"),
+      flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11")
     ]
   end
 
@@ -68,7 +69,7 @@ defmodule ExPTY do
       on_exit: nil,
       debug: Application.get_env(:expty, :debug, false),
       pipe_name: Application.get_env(:expty, :pipe_name, "pipe"),
-      inherit_cursor: Application.get_env(:expty, :inherit_cursor, false),
+      inherit_cursor: Application.get_env(:expty, :inherit_cursor, false)
     ]
   end
 
@@ -103,6 +104,10 @@ defmodule ExPTY do
     Number of rows.
 
     Defaults to 24.
+
+  - `baudrate`: `pos_integer()`
+
+    Defaults to 115200.
 
   - `env`: `%{String.t() => String.t()}`
 
@@ -209,9 +214,13 @@ defmodule ExPTY do
         case GenServer.call(pid, :do_spawn) do
           :ok ->
             {:ok, pid}
-            error -> error
+
+          error ->
+            error
         end
-      error -> error
+
+      error ->
+        error
     end
   end
 
@@ -267,7 +276,8 @@ defmodule ExPTY do
   Resize the pseudoterminal.
   """
   @spec resize(pid, pos_integer, pos_integer) :: :ok | {:error, String.t()}
-  def resize(pty, cols, rows) when is_pid(pty) and is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
+  def resize(pty, cols, rows)
+      when is_pid(pty) and is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
     GenServer.call(pty, {:resize, {cols, rows}})
   end
 
@@ -347,8 +357,9 @@ defmodule ExPTY do
 
     init_pack =
       case :os.type() do
-        {os_type=:unix, _} ->
+        {os_type = :unix, _} ->
           file = file || "sh"
+          baudrate = options[:baudrate] || 115200
           uid = options[:uid] || -1
           gid = options[:gid] || -1
           is_utf8 = options[:encoding] == "utf-8"
@@ -390,6 +401,7 @@ defmodule ExPTY do
             cwd,
             cols,
             rows,
+            baudrate,
             uid,
             gid,
             is_utf8,
@@ -402,12 +414,12 @@ defmodule ExPTY do
             on_exit
           }
 
-        {os_type=:win32, _} ->
+        {os_type = :win32, _} ->
           # win
           file = file || "powershell.exe"
           debug = options[:debug] || false
           pipe_name = options[:pipe_name] || "pipe"
-          pipe_name = "#{pipe_name}-#{:rand.uniform(100000000)}"
+          pipe_name = "#{pipe_name}-#{:rand.uniform(100_000_000)}"
           inherit_cursor = options[:inherit_cursor] || false
 
           {
@@ -430,7 +442,13 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_call(:do_spawn, _from, {os_type=:unix, file, args, env, cwd, cols, rows, uid, gid, is_utf8, closeFDs, helperPath, handle_flow_control, flow_control_pause, flow_control_resume, on_data, on_exit}) do
+  def handle_call(
+        :do_spawn,
+        _from,
+        {os_type = :unix, file, args, env, cwd, cols, rows, baudrate, uid, gid, is_utf8, closeFDs,
+         helperPath, handle_flow_control, flow_control_pause, flow_control_resume, on_data,
+         on_exit}
+      ) do
     ret =
       ExPTY.Nif.spawn_unix(
         file,
@@ -439,6 +457,7 @@ defmodule ExPTY do
         cwd,
         cols,
         rows,
+        baudrate,
         uid,
         gid,
         is_utf8,
@@ -450,50 +469,66 @@ defmodule ExPTY do
       {pipesocket, pid, pty}
       when is_reference(pipesocket) and is_integer(pid) and is_binary(pty) ->
         {:reply, :ok,
-          %T{
-            os_type: os_type,
-            pipesocket: pipesocket,
-            pid: pid,
-            pty: pty,
-            handle_flow_control: handle_flow_control,
-            flow_control_pause: flow_control_pause,
-            flow_control_resume: flow_control_resume,
-            on_data: on_data,
-            on_exit: on_exit
-          }}
+         %T{
+           os_type: os_type,
+           pipesocket: pipesocket,
+           pid: pid,
+           pty: pty,
+           handle_flow_control: handle_flow_control,
+           flow_control_pause: flow_control_pause,
+           flow_control_resume: flow_control_resume,
+           on_data: on_data,
+           on_exit: on_exit
+         }}
     end
   end
 
   @impl true
-  def handle_call(:do_spawn, _from, state={os_type=:win32, file, args, env, cwd, cols, rows, debug, pipe_name, inherit_cursor, on_data, on_exit}) do
+  def handle_call(
+        :do_spawn,
+        _from,
+        state =
+          {os_type = :win32, file, args, env, cwd, cols, rows, debug, pipe_name, inherit_cursor,
+           on_data, on_exit}
+      ) do
     case ExPTY.Nif.spawn_win32(file, cols, rows, debug, pipe_name, inherit_cursor) do
       {pty_id, conin, conout} when is_integer(pty_id) ->
         command_line = args_to_command_line(file, args)
+
         case ExPTY.Nif.connect_win32(pty_id, command_line, cwd, env) do
           {:ok, inner_pid} ->
-            {:reply, :ok, %T{
-              os_type: os_type,
-              pty: pty_id,
-              conin: conin, conout: conout,
-              inner_pid: inner_pid,
-              on_data: on_data,
-              on_exit: on_exit}}
+            {:reply, :ok,
+             %T{
+               os_type: os_type,
+               pty: pty_id,
+               conin: conin,
+               conout: conout,
+               inner_pid: inner_pid,
+               on_data: on_data,
+               on_exit: on_exit
+             }}
+
           error ->
             {:reply, error, state}
         end
+
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
   end
 
   @impl true
-  def handle_call({:write, data}, _from, %T{
-    os_type: :unix,
-    pipesocket: pipesocket,
-    handle_flow_control: handle_flow_control,
-    flow_control_pause: flow_control_pause,
-    flow_control_resume: flow_control_resume
-  } = state) do
+  def handle_call(
+        {:write, data},
+        _from,
+        %T{
+          os_type: :unix,
+          pipesocket: pipesocket,
+          handle_flow_control: handle_flow_control,
+          flow_control_pause: flow_control_pause,
+          flow_control_resume: flow_control_resume
+        } = state
+      ) do
     if handle_flow_control do
       case data do
         ^flow_control_pause ->
@@ -519,7 +554,8 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_call({:kill, signal}, _from, %T{os_type: :unix, pipesocket: pipesocket} = state) when is_integer(signal) do
+  def handle_call({:kill, signal}, _from, %T{os_type: :unix, pipesocket: pipesocket} = state)
+      when is_integer(signal) do
     ret = ExPTY.Nif.kill(pipesocket, signal)
     {:reply, ret, state}
   end
@@ -552,7 +588,11 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_call({:resize, {cols, rows}}, _from, %T{os_type: :unix, pipesocket: pipesocket} = state) do
+  def handle_call(
+        {:resize, {cols, rows}},
+        _from,
+        %T{os_type: :unix, pipesocket: pipesocket} = state
+      ) do
     ret = ExPTY.Nif.resize(pipesocket, cols, rows)
     {:reply, ret, state}
   end
@@ -645,10 +685,15 @@ defmodule ExPTY do
         result
       end
 
-    arg0 =  String.at(arg, 0)
+    arg0 = String.at(arg, 0)
     has_lopsided_enclosing_quote = xor(arg0 != "\"", !String.ends_with?(arg, "\""))
     has_no_eclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
-    quote? = arg == "" || (:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) && ((String.length(arg) > 0) && (has_lopsided_enclosing_quote || has_no_eclosing_quotes))
+
+    quote? =
+      arg == "" ||
+        ((:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) &&
+           (String.length(arg) > 0 && (has_lopsided_enclosing_quote || has_no_eclosing_quotes)))
+
     result =
       if quote? do
         "#{result}\""
@@ -657,14 +702,18 @@ defmodule ExPTY do
       end
 
     bs_count = 0
+
     {bs_count, result} =
-      Enum.reduce(0..String.length(arg)-1, {bs_count, result}, fn index, {bs_count_, result_} ->
+      Enum.reduce(0..(String.length(arg) - 1), {bs_count, result}, fn index,
+                                                                      {bs_count_, result_} ->
         case String.at(arg, index) do
           "\\" ->
             {bs_count_ + 1, result_}
+
           "\"" ->
             result_ = "#{result_}#{repeat_text("\\", bs_count_ * 2 + 1)}\""
             {0, result_}
+
           p ->
             result_ = "#{result_}#{repeat_text("\\", bs_count_)}#{p}"
             {0, result_}
