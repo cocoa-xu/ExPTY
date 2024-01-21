@@ -46,7 +46,8 @@ defmodule ExPTY do
       name: Application.get_env(:expty, :name, "xterm-color"),
       cols: Application.get_env(:expty, :cols, 80),
       rows: Application.get_env(:expty, :rows, 24),
-      baudrate: 115200,
+      ibaudrate: 38400,
+      obaudrate: 38400,
       env: Application.get_env(:expty, :env, System.get_env()),
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
@@ -105,9 +106,17 @@ defmodule ExPTY do
 
     Defaults to 24.
 
-  - `baudrate`: `pos_integer()`
+  - `ibaudrate`: `non_neg_integer()`
 
-    Defaults to 115200.
+    `cfsetispeed(term, ibaudrate)`
+
+    Defaults to 38400.
+
+  - `obaudrate`: `non_neg_integer()`
+
+    `cfsetospeed(term, obaudrate)`
+
+    Defaults to 38400.
 
   - `env`: `%{String.t() => String.t()}`
 
@@ -359,7 +368,8 @@ defmodule ExPTY do
       case :os.type() do
         {os_type = :unix, _} ->
           file = file || "sh"
-          baudrate = options[:baudrate] || 115200
+          ibaudrate = options[:ibaudrate] || 38400
+          obaudrate = options[:obaudrate] || 38400
           uid = options[:uid] || -1
           gid = options[:gid] || -1
           is_utf8 = options[:encoding] == "utf-8"
@@ -401,7 +411,8 @@ defmodule ExPTY do
             cwd,
             cols,
             rows,
-            baudrate,
+            ibaudrate,
+            obaudrate,
             uid,
             gid,
             is_utf8,
@@ -445,7 +456,7 @@ defmodule ExPTY do
   def handle_call(
         :do_spawn,
         _from,
-        {os_type = :unix, file, args, env, cwd, cols, rows, baudrate, uid, gid, is_utf8, closeFDs,
+        {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid, is_utf8, closeFDs,
          helperPath, handle_flow_control, flow_control_pause, flow_control_resume, on_data,
          on_exit}
       ) do
@@ -457,7 +468,8 @@ defmodule ExPTY do
         cwd,
         cols,
         rows,
-        baudrate,
+        ibaudrate,
+        obaudrate,
         uid,
         gid,
         is_utf8,

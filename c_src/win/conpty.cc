@@ -620,7 +620,7 @@ static ErlNifFunc nif_functions[] = {
   {"connect_win32", 4, expty_pty_connect, ERL_NIF_DIRTY_JOB_IO_BOUND},
 
   // stubs
-  {"spawn_unix", 12, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 13, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"pause", 1, expty_stub, ERL_DIRTY_JOB_IO_BOUND},
   {"resume", 1, expty_stub, ERL_DIRTY_JOB_IO_BOUND},
 };

@@ -1,6 +1,7 @@
 #include <sys/types.h>
 #include "common.h"
 #include <vector>
+#include <map>
 #include <string>
 
 #include <errno.h>
@@ -135,8 +136,8 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   std::vector<std::string> envs;
   std::string cwd;
   int cols, rows;
+  int ibaudrate, obaudrate;
   int uid, gid;
-  int baudrate;
   bool is_utf8, closeFDs;
   std::string helper_path;
   if (nif::get(env, argv[0], file) &&
@@ -145,12 +146,13 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[3], cwd) &&
       nif::get(env, argv[4], &cols) && cols > 0 &&
       nif::get(env, argv[5], &rows) && rows > 0 &&
-      nif::get(env, argv[6], &baudrate) && baudrate >= 0 &&
-      nif::get(env, argv[7], &uid) &&
-      nif::get(env, argv[8], &gid) &&
-      nif::get(env, argv[9], &is_utf8) &&
-      nif::get(env, argv[10], &closeFDs) &&
-      nif::get(env, argv[11], helper_path)) {
+      nif::get(env, argv[6], &ibaudrate) && ibaudrate >= 0 &&
+      nif::get(env, argv[7], &obaudrate) && obaudrate >= 0 &&
+      nif::get(env, argv[8], &uid) &&
+      nif::get(env, argv[9], &gid) &&
+      nif::get(env, argv[10], &is_utf8) &&
+      nif::get(env, argv[11], &closeFDs) &&
+      nif::get(env, argv[12], helper_path)) {
 
     pty_pipesocket * pipesocket = NULL;
     ErlNifPid* process = NULL;
@@ -231,8 +233,8 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       argv[i + EXTRA_ARGS] = strdup(args[i].c_str());
     }
 
-    cfsetispeed(term, baudrate);
-    cfsetospeed(term, baudrate);
+    cfsetispeed(term, ibaudrate);
+    cfsetospeed(term, obaudrate);
 
     sigset_t newmask, oldmask;
 
@@ -744,7 +746,7 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 }
 
 static ErlNifFunc nif_functions[] = {
-  {"spawn_unix", 12, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 13, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"kill", 2, expty_kill, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
