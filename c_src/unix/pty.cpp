@@ -124,9 +124,15 @@ static void pty_pipesocket_fn(void *data);
 static void pty_after_pipesocket(uv_async_t *);
 static void pty_after_close_pipesocket(uv_handle_t *);
 
+static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
+
 static std::map<pid_t, pty_pipesocket *> processes;
 
-static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
+static void __attribute__((destructor)) cleanup() {
+  for (auto p : processes) {
+    kill(p.first, SIGTERM);
+  }
+}
 
 static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   // file, args, env, cwd, cols, rows, baudrate, uid, gid, is_utf8, closeFDs, helper_path
