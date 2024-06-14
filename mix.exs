@@ -17,6 +17,7 @@ defmodule ExPTY.MixProject do
       package: package(),
       compilers: [:elixir_make] ++ Mix.compilers(),
       make_env: %{
+        "HAVE_NINJA" => "#{System.find_executable("ninja") != nil}",
         "MAKE_BUILD_FLAGS" =>
           System.get_env("MAKE_BUILD_FLAGS", "-j#{System.schedulers_online()}")
       },
