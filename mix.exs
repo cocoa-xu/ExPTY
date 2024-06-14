@@ -22,7 +22,6 @@ defmodule ExPTY.MixProject do
       },
       make_precompiler: {:nif, CCPrecompiler},
       make_precompiler_url: "#{@github_url}/releases/download/v#{@version}/@{artefact_filename}",
-      make_precompiler_filename: "adbc_nif",
       make_precompiler_nif_versions: [versions: ["2.16"]],
       cc_precompiler: [
         cleanup: "clean",
