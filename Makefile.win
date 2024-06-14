@@ -63,4 +63,5 @@ $(NIF_SO): $(PRIV_DIR) $(NIF_BUILD_DIR) $(LIBUV_A)
 cleanup:
 	@ if exist "$(PRIV_DIR)" rmdir /s /q "$(PRIV_DIR)"
 	@ if exist "$(LIBUV_BUILD_DIR)" rmdir /s /q "$(LIBUV_BUILD_DIR)"
+	@ if exist "$(LIBUV_INSTALL_DIR)" rmdir /s /q "$(LIBUV_INSTALL_DIR)"
 	@ if exist "$(NIF_BUILD_DIR)" rmdir /s /q "$(NIF_BUILD_DIR)"

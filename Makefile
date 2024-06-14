@@ -50,4 +50,5 @@ $(NIF_SO): $(PRIV_DIR) $(LIBUV_A)
 cleanup:
 	@ rm -rf "$(PRIV_DIR)"
 	@ rm -rf "$(LIBUV_BUILD_DIR)"
+	@ rm -rf "$(LIBUV_INSTALL_DIR)"
 	@ rm -rf "$(NIF_BUILD_DIR)"
