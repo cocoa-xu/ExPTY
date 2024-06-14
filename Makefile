@@ -48,5 +48,6 @@ $(NIF_SO): $(PRIV_DIR) $(LIBUV_A)
 	fi
 
 clean:
-	rm -f $(NIF_SO)
-	rm -f $(SPAWN_HELPER)
+	@ rm -rf "$(PRIV_DIR)"
+	@ rm -rf "$(LIBUV_BUILD_DIR)"
+	@ rm -rf "$(NIF_BUILD_DIR)"

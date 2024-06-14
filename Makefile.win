@@ -61,5 +61,6 @@ $(NIF_SO): $(PRIV_DIR) $(NIF_BUILD_DIR) $(LIBUV_A)
 	)
 
 clean:
-	@ if exist "$(NIF_SO)" del "$(NIF_SO)"
-	@ if exist "$(SPAWN_HELPER)" del "$(SPAWN_HELPER)"
+	@ if exist "$(PRIV_DIR)" rmdir /s /q "$(PRIV_DIR)"
+	@ if exist "$(LIBUV_BUILD_DIR)" rmdir /s /q "$(LIBUV_BUILD_DIR)"
+	@ if exist "$(NIF_BUILD_DIR)" rmdir /s /q "$(NIF_BUILD_DIR)"
