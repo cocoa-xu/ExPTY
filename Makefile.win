@@ -51,3 +51,7 @@ $(NIF_SO): $(PRIV_DIR) $(NIF_BUILD_DIR) $(LIBUV_A)
 		cmake --build . $(MAKE_BUILD_FLAGS) --config "$(CMAKE_BUILD_TYPE)" && \
 		cmake --install . --config "$(CMAKE_BUILD_TYPE)" \
 	)
+
+clean:
+	@ if exist "$(NIF_SO)" del "$(NIF_SO)"
+	@ if exist "$(SPAWN_HELPER)" del "$(SPAWN_HELPER)"

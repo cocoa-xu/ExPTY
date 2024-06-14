@@ -27,3 +27,5 @@ ExPTY-*.tar
 
 .DS_Store
 .vscode/
+
+checksum.exs
