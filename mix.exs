@@ -1,13 +1,13 @@
 defmodule ExPTY.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @github_url "https://github.com/cocoa-xu/expty"
 
   def project do
     [
       app: :expty,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.12",
       name: "ExPTY",
       description: "`forkpty(3)` bindings for elixir",
@@ -56,6 +56,7 @@ defmodule ExPTY.MixProject do
         README*
         LICENSE*
         Makefile
+        CMakeLists.txt
       ),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @github_url}
