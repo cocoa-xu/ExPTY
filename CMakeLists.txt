@@ -48,7 +48,7 @@ endif()
 
 add_library(expty SHARED ${expty_src})
 
-if(NOT WIN32)
+if(UNIX AND APPLE)
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
     include(FindLibX)
     find_lib_x(util util.h pty.h)
