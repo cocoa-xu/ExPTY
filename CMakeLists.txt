@@ -46,13 +46,17 @@ endif()
 
 # ==================== expty ====================
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(FindLibX)
-find_lib_x(util util.h pty.h)
 add_library(expty SHARED ${expty_src})
-target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}" "${LIBUTIL_INCLUDE_DIR}")
+
+if(NOT WIN32)
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    include(FindLibX)
+    find_lib_x(util util.h pty.h)
+    target_include_directories(expty PUBLIC "${LIBUTIL_INCLUDE_DIR}")
+    target_link_libraries(expty "${LIBUTIL_LIBRARIES}")
+endif()
+target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
-target_link_libraries(expty "${LIBUTIL_LIBRARIES}")
 set_property(TARGET expty PROPERTY CXX_STANDARD 14)
 set_target_properties(expty PROPERTIES PREFIX "")
 set_target_properties(expty PROPERTIES
