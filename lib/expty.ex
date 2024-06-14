@@ -370,8 +370,8 @@ defmodule ExPTY do
           file = file || "sh"
           ibaudrate = options[:ibaudrate] || 38400
           obaudrate = options[:obaudrate] || 38400
-          uid = options[:uid] || -1
-          gid = options[:gid] || -1
+          uid = options[:uid] || -2
+          gid = options[:gid] || -2
           is_utf8 = options[:encoding] == "utf-8"
           closeFDs = options[:closeFDs] || false
           helperPath = ExPTY.Nif.helper_path()

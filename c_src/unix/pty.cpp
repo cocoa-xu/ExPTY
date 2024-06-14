@@ -228,6 +228,12 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       erl_ret = nif::error(env, "Could not allocate memory for argv.");
       goto done;
     }
+    if (uid == -2) {
+      uid = getuid();
+    }
+    if (gid == -2) {
+      gid = getgid();
+    }
     argv[0] = strdup(helper_path.c_str());
     argv[1] = strdup(cwd.c_str());
     argv[2] = strdup(std::to_string(uid).c_str());
