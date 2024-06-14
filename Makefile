@@ -47,7 +47,7 @@ $(NIF_SO): $(PRIV_DIR) $(LIBUV_A)
 		cmake --install . ; \
 	fi
 
-clean:
+cleanup:
 	@ rm -rf "$(PRIV_DIR)"
 	@ rm -rf "$(LIBUV_BUILD_DIR)"
 	@ rm -rf "$(NIF_BUILD_DIR)"

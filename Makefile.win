@@ -60,7 +60,7 @@ $(NIF_SO): $(PRIV_DIR) $(NIF_BUILD_DIR) $(LIBUV_A)
 		cmake --install . --config "$(CMAKE_BUILD_TYPE)" \
 	)
 
-clean:
+cleanup:
 	@ if exist "$(PRIV_DIR)" rmdir /s /q "$(PRIV_DIR)"
 	@ if exist "$(LIBUV_BUILD_DIR)" rmdir /s /q "$(LIBUV_BUILD_DIR)"
 	@ if exist "$(NIF_BUILD_DIR)" rmdir /s /q "$(NIF_BUILD_DIR)"

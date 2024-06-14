@@ -25,7 +25,7 @@ defmodule ExPTY.MixProject do
       make_precompiler_url: "#{@github_url}/releases/download/v#{@version}/@{artefact_filename}",
       make_precompiler_nif_versions: [versions: ["2.16"]],
       cc_precompiler: [
-        cleanup: "clean",
+        cleanup: "cleanup",
       ]
     ]
   end
@@ -38,9 +38,10 @@ defmodule ExPTY.MixProject do
 
   defp deps do
     [
-      {:elixir_make, "~> 0.7", runtime: false},
-      {:cc_precompiler, "~> 0.1", runtime: false},
-      {:kino, "~> 0.7", optional: true}
+      {:cc_precompiler, "~> 0.1"},
+      {:elixir_make, "~> 0.8"},
+      {:kino, "~> 0.7", optional: true},
+      {:ex_doc, "~> 0.34", only: :docs, runtime: false}
     ]
   end
 
@@ -64,6 +65,7 @@ defmodule ExPTY.MixProject do
         LICENSE*
         Makefile
         CMakeLists.txt
+        checksum.exs
       ),
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @github_url}
