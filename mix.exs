@@ -55,7 +55,7 @@ defmodule ExPTY.MixProject do
 
   defp package() do
     [
-      name: "ExPTY",
+      name: "expty",
       files: ~w(
         c_src
         3rd_party
