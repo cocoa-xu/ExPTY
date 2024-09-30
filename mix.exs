@@ -1,7 +1,7 @@
 defmodule ExPTY.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
   @github_url "https://github.com/cocoa-xu/expty"
 
   def project do
@@ -25,7 +25,7 @@ defmodule ExPTY.MixProject do
       make_precompiler_url: "#{@github_url}/releases/download/v#{@version}/@{artefact_filename}",
       make_precompiler_nif_versions: [versions: ["2.16"]],
       cc_precompiler: [
-        cleanup: "cleanup",
+        cleanup: "cleanup"
       ]
     ]
   end

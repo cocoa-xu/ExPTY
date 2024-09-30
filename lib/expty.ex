@@ -456,9 +456,9 @@ defmodule ExPTY do
   def handle_call(
         :do_spawn,
         _from,
-        {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid, is_utf8, closeFDs,
-         helperPath, handle_flow_control, flow_control_pause, flow_control_resume, on_data,
-         on_exit}
+        {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
+         is_utf8, closeFDs, helperPath, handle_flow_control, flow_control_pause,
+         flow_control_resume, on_data, on_exit}
       ) do
     ret =
       ExPTY.Nif.spawn_unix(
