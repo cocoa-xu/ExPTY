@@ -17,6 +17,7 @@ else
         assign(ctx,
           executable: executable,
           pty: nil,
+          pty_ref: nil,
           started?: false
         )
 
@@ -53,6 +54,12 @@ else
 
         ExPTY.on_data(pty, fn _, _, data ->
           broadcast_event(ctx, "data", %{data: Base.encode64(data)})
+        end)
+
+        self = self()
+
+        ExPTY.on_exit(pty, fn _, _, exit_code, _ ->
+          Process.send_after(self, {:executable_exited, exit_code}, 0)
         end)
 
         {:noreply,
@@ -105,6 +112,11 @@ else
       end
 
       {:noreply, ctx}
+    end
+
+    def handle_info({:executable_exited, code}, ctx) do
+      broadcast_event(ctx, "executable_exited", %{code: code})
+      {:noreply, assign(ctx, pty: nil, pty_ref: nil, started?: false)}
     end
 
     @impl true

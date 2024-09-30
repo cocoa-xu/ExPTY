@@ -61,12 +61,16 @@ button {
 
 .header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   justify-content: flex-start;
   background-color: var(--blue-100);
   padding: 8px 16px;
-  margin-bottom: 12px;
-  border-radius: 0.5rem 0.5rem 0 0;
+  border-left: solid 1px var(--gray-300);
+  border-top: solid 1px var(--gray-300);
+  border-right: solid 1px var(--gray-300);
   border-bottom: solid 1px var(--gray-200);
+  border-radius: 0.5rem 0.5rem 0 0;
   gap: 16px;
 }
 
@@ -129,7 +133,10 @@ input[required].empty {
   font-weight: 500;
   padding-right: 6px;
   font-size: 0.875rem;
-  text-transform: uppercase;
+}
+
+.inline-status-label {
+  padding: 8px 0px;
 }
 
 .input-label-tooltip {
