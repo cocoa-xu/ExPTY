@@ -16,6 +16,7 @@ defmodule ExPTY do
     :pty,
     :on_data,
     :on_exit,
+    :echo?,
 
     # unix
     :pipesocket,
@@ -52,6 +53,7 @@ defmodule ExPTY do
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
       on_exit: nil,
+      echo?: Application.get_env(:expty, :echo?, false),
       encoding: Application.get_env(:expty, :encoding, "utf-8"),
       handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
       flow_control_pause: Application.get_env(:expty, :flow_control_pause, "\x13"),
@@ -322,6 +324,14 @@ defmodule ExPTY do
     GenServer.call(pty, :resume)
   end
 
+  @doc """
+  Set echo mode (only available on Unix systems at the moment).
+  """
+  @spec set_echo(pid, boolean) :: :ok
+  def set_echo(pty, echo?) when is_pid(pty) and is_boolean(echo?) do
+    GenServer.call(pty, {:set_echo, echo?})
+  end
+
   # GenServer callbacks
 
   @impl true
@@ -374,6 +384,7 @@ defmodule ExPTY do
           gid = options[:gid] || -2
           is_utf8 = options[:encoding] == "utf-8"
           closeFDs = options[:closeFDs] || false
+          echo? = options[:echo?] || false
           helperPath = ExPTY.Nif.helper_path()
 
           handle_flow_control = options[:handle_flow_control] || false
@@ -417,6 +428,7 @@ defmodule ExPTY do
             gid,
             is_utf8,
             closeFDs,
+            echo?,
             helperPath,
             handle_flow_control,
             flow_control_pause,
@@ -457,7 +469,7 @@ defmodule ExPTY do
         :do_spawn,
         _from,
         {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
-         is_utf8, closeFDs, helperPath, handle_flow_control, flow_control_pause,
+         is_utf8, closeFDs, echo?, helperPath, handle_flow_control, flow_control_pause,
          flow_control_resume, on_data, on_exit}
       ) do
     ret =
@@ -474,6 +486,7 @@ defmodule ExPTY do
         gid,
         is_utf8,
         closeFDs,
+        echo?,
         helperPath
       )
 
@@ -490,7 +503,8 @@ defmodule ExPTY do
            flow_control_pause: flow_control_pause,
            flow_control_resume: flow_control_resume,
            on_data: on_data,
-           on_exit: on_exit
+           on_exit: on_exit,
+           echo?: echo?
          }}
     end
   end
@@ -643,6 +657,13 @@ defmodule ExPTY do
   def handle_call(:resume, _from, %T{pipesocket: pipesocket} = state) do
     ret = ExPTY.Nif.resume(pipesocket)
     {:reply, ret, state}
+  end
+
+  @impl true
+  def handle_call({:set_echo, echo?}, _from, %T{os_type: :unix, pipesocket: pipesocket} = state)
+      when is_boolean(echo?) do
+    ret = ExPTY.Nif.set_echo(pipesocket, echo?)
+    {:reply, ret, %T{state | echo?: echo?}}
   end
 
   @impl true

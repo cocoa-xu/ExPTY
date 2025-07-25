@@ -145,6 +145,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
   int ibaudrate, obaudrate;
   int uid, gid;
   bool is_utf8, closeFDs;
+  bool echo = false;
   std::string helper_path;
   if (nif::get(env, argv[0], file) &&
       nif::get_list(env, argv[1], args) &&
@@ -158,7 +159,8 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[9], &gid) &&
       nif::get(env, argv[10], &is_utf8) &&
       nif::get(env, argv[11], &closeFDs) &&
-      nif::get(env, argv[12], helper_path)) {
+      nif::get(env, argv[12], &echo) &&
+      nif::get(env, argv[13], helper_path)) {
 
     pty_pipesocket * pipesocket = NULL;
     ErlNifPid* process = NULL;
@@ -193,7 +195,11 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     }
     term->c_oflag = OPOST | ONLCR;
     term->c_cflag = CREAD | CS8 | HUPCL;
-    term->c_lflag = ICANON | ISIG | IEXTEN | ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL;
+    if (echo) {
+      term->c_lflag = ICANON | ISIG | IEXTEN | ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL;
+    } else {
+      term->c_lflag = ICANON | ISIG | IEXTEN;
+    }
 
     term->c_cc[VEOF] = 4;
     term->c_cc[VEOL] = -1;
@@ -509,6 +515,35 @@ static ERL_NIF_TERM expty_resume(ErlNifEnv *env, int argc, const ERL_NIF_TERM ar
   }
 }
 
+static ERL_NIF_TERM expty_set_echo(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+  pty_pipesocket * pipesocket = nullptr;
+  bool echo = false;
+
+  if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket &&
+      nif::get(env, argv[1], &echo)) {
+
+    struct termios settings; 
+
+    if (tcgetattr(pipesocket->fd, &settings) < 0) {
+      return nif::error(env, "tcgetattr failed.\n");
+    }
+
+    if (echo) {
+      settings.c_lflag |= ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL;
+    } else {
+      settings.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL);
+    }
+    
+    if (tcsetattr(pipesocket->fd, TCSANOW, &settings) < 0) {
+      return nif::error(env, "tcsetattr failed.\n");
+    }
+
+    return nif::atom(env, "ok");
+  } else {
+    return nif::error(env, "Cannot get pipesocket resource");
+  }
+}
+
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno) {
   return nif::error(env, (
     message + std::string(strerror(_errno))
@@ -755,12 +790,13 @@ static int on_upgrade(ErlNifEnv *, void **, void **, ERL_NIF_TERM) {
 }
 
 static ErlNifFunc nif_functions[] = {
-  {"spawn_unix", 13, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 14, expty_spawn, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"write", 2, expty_write, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"kill", 2, expty_kill, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"resize", 3, expty_resize, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"pause", 1, expty_pause, ERL_DIRTY_JOB_IO_BOUND},
   {"resume", 1, expty_resume, ERL_DIRTY_JOB_IO_BOUND},
+  {"set_echo", 2, expty_set_echo, ERL_DIRTY_JOB_IO_BOUND},
 
   // stubs
   {"spawn_win32", 6, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
