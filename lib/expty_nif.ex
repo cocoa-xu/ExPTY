@@ -39,6 +39,7 @@ defmodule ExPTY.Nif do
         _gid,
         _is_utf8,
         _closeFDs,
+        _echo?,
         _helperPath
       ),
       do: :erlang.nif_error(:not_loaded)
@@ -59,5 +60,8 @@ defmodule ExPTY.Nif do
     do: :erlang.nif_error(:not_loaded)
 
   def resume(_arg1),
+    do: :erlang.nif_error(:not_loaded)
+
+  def set_echo(_arg1, _echo?),
     do: :erlang.nif_error(:not_loaded)
 end
