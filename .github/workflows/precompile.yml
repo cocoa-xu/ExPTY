@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - uses: erlef/setup-beam@v1
         with:
@@ -55,7 +55,7 @@ jobs:
             cache/expty*.sha256
 
   macos:
-    runs-on: macos-12
+    runs-on: macos-13
     env:
       MIX_ENV: prod
       elixir_version: "1.16.2"
@@ -68,7 +68,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install erlang and elixir
         run: |
@@ -111,7 +111,7 @@ jobs:
             cache/expty*.sha256
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       MIX_ENV: prod
     strategy:
@@ -122,7 +122,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - uses: erlef/setup-beam@v1
         with:
