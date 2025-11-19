@@ -79,7 +79,7 @@ if(NOT WIN32)
     set_target_properties(expty PROPERTIES SUFFIX ".so")
     target_link_libraries(expty libuv::uv_a)
 else()
-    target_link_libraries(expty PRIVATE "libuv::uv_a" "Shlwapi" "Ws2_32" "Iphlpapi" "Userenv")
+    target_link_libraries(expty PRIVATE "libuv::uv_a" "Shlwapi" "Ws2_32" "Iphlpapi" "Userenv" "Dbghelp")
 endif()
 
 # ===============================================
