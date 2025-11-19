@@ -7,8 +7,8 @@ NIF_SO = $(PRIV_DIR)/expty.dll
 
 C_SRC = $(MAKEDIR)\c_src
 LIB_SRC = $(MAKEDIR)\lib
-LIBUV_SRC = $(MAKEDIR)\3rd_party\libuv-1.44.2
-LIBUV_BUILD_DIR = $(MIX_APP_PATH)/cmake_libuv-1.44.2
+LIBUV_SRC = $(MAKEDIR)\3rd_party\libuv-1.51.0
+LIBUV_BUILD_DIR = $(MIX_APP_PATH)/cmake_libuv-1.51.0
 LIBUV_INSTALL_DIR = $(MIX_APP_PATH)/libuv
 LIBUV_A = $(LIBUV_INSTALL_DIR)/lib/uv_a.lib
 LIBUV_CMAKE_SOURCE_DIR = $(LIBUV_INSTALL_DIR)/cmake/libuv
