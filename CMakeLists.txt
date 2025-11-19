@@ -58,7 +58,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${LIBUV_CMAKE_SOURCE_DIR}")
 target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
-find_library(LIBUV NAMES libuv.a libuv_a.a PATHS "${LIBUV_LIBRARIES_DIR}" NO_DEFAULT_PATH REQUIRED)
+if(WIN32)
+    find_library(LIBUV NAMES libuv.lib libuv_a.lib PATHS "${LIBUV_LIBRARIES_DIR}" NO_DEFAULT_PATH REQUIRED)
+else()
+    find_library(LIBUV NAMES libuv.a libuv_a.a PATHS "${LIBUV_LIBRARIES_DIR}" NO_DEFAULT_PATH REQUIRED)
+endif()
 add_library(libuv::uv_a STATIC IMPORTED)
 set_target_properties(libuv::uv_a PROPERTIES
     IMPORTED_LOCATION "${LIBUV}"
