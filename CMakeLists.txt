@@ -55,8 +55,19 @@ if(UNIX AND APPLE)
     target_include_directories(expty PUBLIC "${LIBUTIL_INCLUDE_DIR}")
     target_link_libraries(expty "${LIBUTIL_LIBRARIES}")
 endif()
+list(APPEND CMAKE_MODULE_PATH "${LIBUV_CMAKE_SOURCE_DIR}")
 target_include_directories(expty PUBLIC "${LIBUV_INCLUDE_DIR}")
 target_link_directories(expty PUBLIC "${LIBUV_LIBRARIES_DIR}")
+if(WIN32)
+    find_library(LIBUV NAMES libuv.lib libuv_a.lib PATHS "${LIBUV_LIBRARIES_DIR}" NO_DEFAULT_PATH REQUIRED)
+else()
+    find_library(LIBUV NAMES libuv.a libuv_a.a PATHS "${LIBUV_LIBRARIES_DIR}" NO_DEFAULT_PATH REQUIRED)
+endif()
+add_library(libuv::uv_a STATIC IMPORTED)
+set_target_properties(libuv::uv_a PROPERTIES
+    IMPORTED_LOCATION "${LIBUV}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LIBUV_INCLUDE_DIR}"
+)
 set_property(TARGET expty PROPERTY CXX_STANDARD 14)
 set_target_properties(expty PROPERTIES PREFIX "")
 set_target_properties(expty PROPERTIES
@@ -66,9 +77,9 @@ set_target_properties(expty PROPERTIES
 install(TARGETS expty DESTINATION "${PRIV_DIR}")
 if(NOT WIN32)
     set_target_properties(expty PROPERTIES SUFFIX ".so")
-    target_link_libraries(expty "uv_a")
+    target_link_libraries(expty libuv::uv_a)
 else()
-    target_link_libraries(expty PRIVATE "uv_a" "Shlwapi" "Ws2_32" "Iphlpapi" "Userenv")
+    target_link_libraries(expty PRIVATE "libuv::uv_a" "Shlwapi" "Ws2_32" "Iphlpapi" "Userenv" "Dbghelp")
 endif()
 
 # ===============================================
