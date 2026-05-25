@@ -55,7 +55,7 @@ jobs:
             cache/expty*.sha256
 
   macos:
-    runs-on: macos-13
+    runs-on: macos-14
     env:
       MIX_ENV: prod
       elixir_version: "1.16.2"
