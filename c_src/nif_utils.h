@@ -1,6 +1,7 @@
 #pragma once
 
 #include <erl_nif.h>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,7 @@ static ERL_NIF_TERM error(ErlNifEnv *env, const char *msg)
   unsigned char * ptr;
   size_t len = strlen(msg);
   if ((ptr = enif_make_new_binary(env, len, &reason)) != nullptr) {
-    strcpy((char *)ptr, msg);
+    memcpy(ptr, msg, len);
     return enif_make_tuple2(env, atom_error, reason);
   } else {
     ERL_NIF_TERM msg_term = enif_make_string(env, msg, ERL_NIF_LATIN1);
@@ -36,7 +37,7 @@ static ERL_NIF_TERM make_string(ErlNifEnv *env, const char *msg, bool& success) 
   unsigned char * ptr;
   size_t len = strlen(msg);
   if ((ptr = enif_make_new_binary(env, len, &erl_string)) != nullptr) {
-    strcpy((char *)ptr, msg);
+    memcpy(ptr, msg, len);
     success = true;
     return erl_string;
   } else {

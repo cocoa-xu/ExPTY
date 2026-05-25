@@ -5,3 +5,5 @@
 #define COMM_ERR_CHDIR 2
 #define COMM_ERR_SETUID 3
 #define COMM_ERR_SETGID 4
+#define COMM_ERR_SETSID 5
+#define COMM_ERR_TIOCSCTTY 6
