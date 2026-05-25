@@ -9,6 +9,10 @@ defmodule ExPTY do
 
   use GenServer
 
+  @type on_data_callback :: (module(), pid(), binary() -> term()) | module()
+  @type on_exit_callback :: (module(), pid(), integer(), integer() | nil -> term()) | module()
+  @type error :: {:error, String.t()}
+
   defstruct [
     # common
     :os_type,
@@ -79,7 +83,7 @@ defmodule ExPTY do
   @doc """
   Forks a process as a pseudoterminal.
 
-  ##### Positional Paramters
+  ##### Positional Parameters
   - `file`: `String.t()`
 
     The file to launch.
@@ -135,7 +139,7 @@ defmodule ExPTY do
 
     Defaults to `Path.expand("~")`.
 
-  - `on_data`: `(ExPTY, pid(), binary() -> term()) | atom`
+  - `on_data`: `(module(), pid(), binary() -> term()) | module()`
 
     Callback when data is available.
 
@@ -152,7 +156,7 @@ defmodule ExPTY do
 
     The return value of this callback function is ignored.
 
-  - `on_exit`: `(ExPTY, pid(), integer(), integer() | nil -> term()) | atom`
+  - `on_exit`: `(module(), pid(), integer(), integer() | nil -> term()) | module()`
 
     Callback when the spawned process exited.
 
@@ -166,7 +170,7 @@ defmodule ExPTY do
       4. `integer() | nil`: On unix, this is the signal code from the spawned process. On Windows, this value
         is `nil`.
 
-    When passing a module name, the module should export an `on_data/3` function,
+    When passing a module name, the module should export an `on_exit/4` function,
     this function should expect the same arguments as mentioned above.
 
     The return value of this callback function is ignored.
@@ -186,7 +190,7 @@ defmodule ExPTY do
 
     Default messages to indicate PAUSE for automatic flow control.
 
-    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+    Customizable to avoid conflicts with rebound XON/XOFF control codes (such as oh-my-zsh),
 
     Defaults to `\x13`, i.e, `XOFF`.
 
@@ -194,7 +198,7 @@ defmodule ExPTY do
 
     Default messages to indicate RESUME for automatic flow control.
 
-    Customisble to avoid conflicts with rebound XON/XOFF control codes (such as on-my-zsh),
+    Customizable to avoid conflicts with rebound XON/XOFF control codes (such as oh-my-zsh),
 
     Defaults to `\x11`, i.e, `XON`.
 
@@ -218,7 +222,7 @@ defmodule ExPTY do
 
     Defaults to `false`.
   """
-  @spec spawn(String.t(), [String.t()], keyword) :: {:ok, pid} | {:error, String.t()}
+  @spec spawn(String.t() | nil, [String.t()] | nil, keyword()) :: {:ok, pid()} | error()
   def spawn(file, args, opts \\ []) do
     case GenServer.start(__MODULE__, {file, args, opts}) do
       {:ok, pid} ->
@@ -238,7 +242,7 @@ defmodule ExPTY do
   @doc """
   Write data to the pseudoterminal.
   """
-  @spec write(pid, binary) :: :ok | {:error, String.t()} | {:partial, integer}
+  @spec write(pid(), iodata()) :: :ok | {:error, String.t()} | {:partial, non_neg_integer()}
   def write(pty, data) do
     GenServer.call(pty, {:write, data})
   end
@@ -248,7 +252,7 @@ defmodule ExPTY do
 
   On Unix, the signal is sent to the spawned process group.
   """
-  @spec kill(pid, integer) :: :ok | :not_implemented_yet | {:error, String.t()}
+  @spec kill(pid(), integer()) :: :ok | :not_implemented_yet | {:error, String.t()}
   def kill(pty, signal) when is_integer(signal) do
     GenServer.call(pty, {:kill, signal})
   end
@@ -256,7 +260,7 @@ defmodule ExPTY do
   @doc """
   Set callback function or module when data is available from the pseudoterminal.
   """
-  @spec on_data(pid(), atom | (ExPTY, pid(), binary() -> any)) :: :ok
+  @spec on_data(pid(), on_data_callback()) :: :ok | error()
   def on_data(pty, callback) when is_function(callback, 3) do
     GenServer.call(pty, {:update_on_data, {:func, callback}})
   end
@@ -265,14 +269,14 @@ defmodule ExPTY do
     if Kernel.function_exported?(module, :on_data, 3) do
       GenServer.call(pty, {:update_on_data, {:module, module}})
     else
-      {:error, "expecting #{module}.on_data/3 to be exist"}
+      {:error, "expected #{inspect(module)}.on_data/3 to exist"}
     end
   end
 
   @doc """
   Set callback function or module when the process exited.
   """
-  @spec on_exit(pid(), atom() | (ExPTY, pid(), integer(), integer() | nil -> any)) :: :ok
+  @spec on_exit(pid(), on_exit_callback()) :: :ok | error()
   def on_exit(pty, callback) when is_function(callback, 4) do
     GenServer.call(pty, {:update_on_exit, {:func, callback}})
   end
@@ -281,14 +285,14 @@ defmodule ExPTY do
     if Kernel.function_exported?(module, :on_exit, 4) do
       GenServer.call(pty, {:update_on_exit, {:module, module}})
     else
-      {:error, "expecting #{module}.on_exit/3 to be exist"}
+      {:error, "expected #{inspect(module)}.on_exit/4 to exist"}
     end
   end
 
   @doc """
   Resize the pseudoterminal.
   """
-  @spec resize(pid, pos_integer, pos_integer) :: :ok | {:error, String.t()}
+  @spec resize(pid(), pos_integer(), pos_integer()) :: :ok | error()
   def resize(pty, cols, rows)
       when is_pid(pty) and is_integer(cols) and cols > 0 and is_integer(rows) and rows > 0 do
     GenServer.call(pty, {:resize, {cols, rows}})
@@ -297,7 +301,7 @@ defmodule ExPTY do
   @doc """
   Get flow control status (only available on Unix systems at the moment).
   """
-  @spec flow_control(pid) :: boolean()
+  @spec flow_control(pid()) :: boolean() | nil
   def flow_control(pty) when is_pid(pty) do
     GenServer.call(pty, :flow_control)
   end
@@ -305,7 +309,7 @@ defmodule ExPTY do
   @doc """
   Set flow control status (only available on Unix systems at the moment).
   """
-  @spec flow_control(pid, boolean) :: :ok
+  @spec flow_control(pid(), boolean()) :: :ok
   def flow_control(pty, enable?) when is_pid(pty) and is_boolean(enable?) do
     GenServer.call(pty, {:flow_control, enable?})
   end
@@ -313,7 +317,7 @@ defmodule ExPTY do
   @doc """
   Pause flow (only available on Unix systems at the moment).
   """
-  @spec pause(pid) :: :ok
+  @spec pause(pid()) :: :ok | error()
   def pause(pty) when is_pid(pty) do
     GenServer.call(pty, :pause)
   end
@@ -321,7 +325,7 @@ defmodule ExPTY do
   @doc """
   Resume flow (only available on Unix systems at the moment).
   """
-  @spec resume(pid) :: :ok
+  @spec resume(pid()) :: :ok | error()
   def resume(pty) when is_pid(pty) do
     GenServer.call(pty, :resume)
   end
@@ -329,7 +333,7 @@ defmodule ExPTY do
   @doc """
   Set echo mode (only available on Unix systems at the moment).
   """
-  @spec set_echo(pid, boolean) :: :ok
+  @spec set_echo(pid(), boolean()) :: :ok | error()
   def set_echo(pty, echo?) when is_pid(pty) and is_boolean(echo?) do
     GenServer.call(pty, {:set_echo, echo?})
   end
@@ -337,11 +341,10 @@ defmodule ExPTY do
   # GenServer callbacks
 
   @impl true
-  @spec init({String.t(), [String.t()], Keyword.t()}) :: {:ok, term()}
+  @spec init({String.t() | nil, [String.t()] | nil, Keyword.t()}) :: {:ok, term()}
   def init(init_args) do
     {file, args, pty_options} = init_args
 
-    # Initialize arguments
     default_options = default_pty_options()
     options = Keyword.merge(default_options, pty_options)
     args = args || []
@@ -350,31 +353,8 @@ defmodule ExPTY do
     cols = options[:cols]
     rows = options[:rows]
 
-    on_data = options[:on_data] || nil
-
-    on_data =
-      if is_function(on_data, 3) do
-        {:func, on_data}
-      else
-        if is_atom(on_data) and Kernel.function_exported?(on_data, :on_data, 3) do
-          {:module, on_data}
-        else
-          nil
-        end
-      end
-
-    on_exit = options[:on_exit] || nil
-
-    on_exit =
-      if is_function(on_exit, 4) do
-        {:func, on_exit}
-      else
-        if is_atom(on_exit) and Kernel.function_exported?(on_exit, :on_exit, 3) do
-          {:module, on_exit}
-        else
-          nil
-        end
-      end
+    on_data = normalize_callback(options[:on_data], :on_data, 3)
+    on_exit = normalize_callback(options[:on_exit], :on_exit, 4)
 
     init_pack =
       case :os.type() do
@@ -385,9 +365,9 @@ defmodule ExPTY do
           uid = options[:uid] || -2
           gid = options[:gid] || -2
           is_utf8 = options[:encoding] == "utf-8"
-          closeFDs = options[:closeFDs] || false
+          close_fds = Keyword.get(options, :close_fds, Keyword.get(options, :closeFDs, false))
           echo? = options[:echo?] || false
-          helperPath = ExPTY.Nif.helper_path()
+          helper_path = ExPTY.Nif.helper_path()
 
           handle_flow_control = options[:handle_flow_control] || false
 
@@ -429,9 +409,9 @@ defmodule ExPTY do
             uid,
             gid,
             is_utf8,
-            closeFDs,
+            close_fds,
             echo?,
-            helperPath,
+            helper_path,
             handle_flow_control,
             flow_control_pause,
             flow_control_resume,
@@ -470,9 +450,10 @@ defmodule ExPTY do
   def handle_call(
         :do_spawn,
         _from,
-        {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
-         is_utf8, closeFDs, echo?, helperPath, handle_flow_control, flow_control_pause,
-         flow_control_resume, on_data, on_exit}
+        state =
+          {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
+           is_utf8, close_fds, echo?, helper_path, handle_flow_control, flow_control_pause,
+           flow_control_resume, on_data, on_exit}
       ) do
     ret =
       ExPTY.Nif.spawn_unix(
@@ -487,9 +468,9 @@ defmodule ExPTY do
         uid,
         gid,
         is_utf8,
-        closeFDs,
+        close_fds,
         echo?,
-        helperPath
+        helper_path
       )
 
     case ret do
@@ -508,6 +489,9 @@ defmodule ExPTY do
            on_exit: on_exit,
            echo?: echo?
          }}
+
+      {:error, _reason} = error ->
+        {:stop, :normal, error, state}
     end
   end
 
@@ -537,11 +521,11 @@ defmodule ExPTY do
              }}
 
           error ->
-            {:reply, error, state}
+            {:stop, :normal, error, state}
         end
 
       {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:stop, :normal, {:error, reason}, state}
     end
   end
 
@@ -590,8 +574,6 @@ defmodule ExPTY do
 
   @impl true
   def handle_call({:kill, signal}, _from, %T{os_type: :win32} = state) when is_integer(signal) do
-    # ret = ExPTY.Nif.kill(pipesocket, signal)
-    # TODO: implement kill/2 on windows
     {:reply, :not_implemented_yet, state}
   end
 
@@ -722,12 +704,12 @@ defmodule ExPTY do
 
     arg0 = String.at(arg, 0)
     has_lopsided_enclosing_quote = xor(arg0 != "\"", !String.ends_with?(arg, "\""))
-    has_no_eclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
+    has_no_enclosing_quotes = arg0 != "\"" && !String.ends_with?(arg, "\"")
 
     quote? =
       arg == "" ||
         ((:binary.match(arg, " ") != :nomatch || :binary.match(arg, "\t") != :nomatch) &&
-           (String.length(arg) > 0 && (has_lopsided_enclosing_quote || has_no_eclosing_quotes)))
+           (String.length(arg) > 0 && (has_lopsided_enclosing_quote || has_no_enclosing_quotes)))
 
     result =
       if quote? do
@@ -746,42 +728,40 @@ defmodule ExPTY do
             {bs_count_ + 1, result_}
 
           "\"" ->
-            result_ = "#{result_}#{repeat_text("\\", bs_count_ * 2 + 1)}\""
+            result_ = "#{result_}#{String.duplicate("\\", bs_count_ * 2 + 1)}\""
             {0, result_}
 
           p ->
-            result_ = "#{result_}#{repeat_text("\\", bs_count_)}#{p}"
+            result_ = "#{result_}#{String.duplicate("\\", bs_count_)}#{p}"
             {0, result_}
         end
       end)
 
     result =
       if quote? do
-        "#{result}#{repeat_text("\\", bs_count * 2)}\""
+        "#{result}#{String.duplicate("\\", bs_count * 2)}\""
       else
-        "#{result}#{repeat_text("\\", bs_count)}"
+        "#{result}#{String.duplicate("\\", bs_count)}"
       end
 
     args_to_command_line_impl(argv, index + 1, result)
   end
 
-  defp repeat_text(_text, count) when count < 0 do
-    ""
-  end
-
-  defp repeat_text(text, count) when count >= 0 do
-    repeat_text_impl(text, count, [])
-  end
-
-  defp repeat_text_impl(_text, count, result) when count <= 0 do
-    IO.iodata_to_binary(result)
-  end
-
-  defp repeat_text_impl(text, count, result) when count > 0 do
-    repeat_text_impl(text, count - 1, [text | result])
-  end
-
   defp xor(a, b) when is_boolean(a) and is_boolean(b) do
     (a && !b) || (!a && b)
   end
+
+  defp normalize_callback(nil, _name, _arity), do: nil
+
+  defp normalize_callback(callback, _name, arity) when is_function(callback, arity) do
+    {:func, callback}
+  end
+
+  defp normalize_callback(module, name, arity) when is_atom(module) do
+    if Kernel.function_exported?(module, name, arity) do
+      {:module, module}
+    end
+  end
+
+  defp normalize_callback(_callback, _name, _arity), do: nil
 end

@@ -7,14 +7,15 @@ LIB_SRC = $(shell pwd)/lib
 LIBUV_SRC = $(shell pwd)/3rd_party/libuv-1.51.0
 LIBUV_BUILD_DIR = $(MIX_APP_PATH)/cmake_libuv-1.51.0
 LIBUV_INSTALL_DIR = $(MIX_APP_PATH)/libuv
-LIBUV_A = $(LIBUV_INSTALL_DIR)/lib/libuv_a.a
+LIBUV_A = $(LIBUV_INSTALL_DIR)/lib/libuv.a
 LIBUV_CMAKE_SOURCE_DIR = $(LIBUV_INSTALL_DIR)/cmake/libuv
 NIF_BUILD_DIR = $(MIX_APP_PATH)/cmake_expty
+NIF_SOURCES = $(shell find "$(C_SRC)" -type f) CMakeLists.txt
 
 DEFAULT_JOBS ?= 1
 MAKE_BUILD_FLAGS ?= -j$(DEFAULT_JOBS)
 
-.DEFAULT_GLOBAL := build
+.DEFAULT_GOAL := build
 
 build: $(NIF_SO)
 	@ echo > /dev/null
@@ -32,9 +33,8 @@ $(LIBUV_A): $(PRIV_DIR)
 		cmake --install . ; \
 	fi
 
-$(NIF_SO): $(PRIV_DIR) $(LIBUV_A)
-	@ if [ ! -e "$(NIF_SO)" ]; then \
-		mkdir -p "$(NIF_BUILD_DIR)" && \
+$(NIF_SO): $(PRIV_DIR) $(LIBUV_A) $(NIF_SOURCES)
+	@ mkdir -p "$(NIF_BUILD_DIR)" && \
 		cd "$(NIF_BUILD_DIR)" && \
 		cmake "$(shell pwd)" -D CMAKE_INSTALL_PREFIX="$(PRIV_DIR)" \
 			-D LIBUV_INCLUDE_DIR="$(LIBUV_INSTALL_DIR)/include" \
@@ -46,8 +46,7 @@ $(NIF_SO): $(PRIV_DIR) $(LIBUV_A)
 			-D PRIV_DIR="$(PRIV_DIR)" \
 			-D ERTS_INCLUDE_DIR="$(ERTS_INCLUDE_DIR)" && \
 		cmake --build . $(MAKE_BUILD_FLAGS) && \
-		cmake --install . ; \
-	fi
+		cmake --install .
 
 cleanup:
 	@ rm -rf "$(PRIV_DIR)"

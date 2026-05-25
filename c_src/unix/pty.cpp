@@ -630,6 +630,7 @@ pty_pipesocket_fn(void *data) {
       const size_t buf_size = 1024;
       char buffer[buf_size] = {'\0'};
       ssize_t bytes_read = read(fd, buffer, buf_size);
+
       if (bytes_read == 0) {
         pipesocket->fd_closed = true;
         close(fd);
@@ -648,15 +649,17 @@ pty_pipesocket_fn(void *data) {
 
       ERL_NIF_TERM dataread;
       unsigned char * ptr;
+      size_t bytes_read_size = static_cast<size_t>(bytes_read);
 
       ErlNifEnv * msg_env = enif_alloc_env();
-      if ((ptr = enif_make_new_binary(msg_env, bytes_read, &dataread)) != nullptr) {
-        memcpy(ptr, buffer, bytes_read);
+      if ((ptr = enif_make_new_binary(msg_env, bytes_read_size, &dataread)) != nullptr) {
+        memcpy(ptr, buffer, bytes_read_size);
         enif_send(NULL, &pipesocket->process, msg_env, enif_make_tuple2(msg_env,
           nif::atom(msg_env, "data"),
           dataread
         ));
       }
+
       enif_free_env(msg_env);
     }
   }
@@ -670,10 +673,11 @@ size_t pty_pipesocket::write(void * data, size_t len) {
   }
 
   uv_mutex_lock(&this->mutex);
+  const char *buffer = static_cast<const char *>(data);
   size_t bytes_to_write = len, bytes_written = 0, buffer_size = 1024, nbytes = 0;
   size_t retry = 3;
 
-  while (true) {
+  while (bytes_written < len) {
     nbytes = buffer_size;
     if (buffer_size > bytes_to_write) {
       nbytes = bytes_to_write;
@@ -683,18 +687,30 @@ size_t pty_pipesocket::write(void * data, size_t len) {
       break;
     }
 
-    ssize_t bytes_written_cur = ::write(this->fd, static_cast<char *>(data) + bytes_written, nbytes);
+    ssize_t bytes_written_cur = ::write(this->fd, buffer + bytes_written, nbytes);
     if (bytes_written_cur > 0) {
       bytes_written += bytes_written_cur;
       bytes_to_write -= bytes_written_cur;
+      retry = 3;
       if (bytes_written == len) {
         break;
       }
-    } else {
-      if (retry-- > 0) {
-        usleep(10);
-      }
+      continue;
     }
+
+    if (bytes_written_cur == -1 && errno == EINTR) {
+      continue;
+    }
+
+    if (bytes_written_cur == -1 &&
+        (errno == EAGAIN || errno == EWOULDBLOCK) &&
+        retry > 0) {
+      retry--;
+      usleep(10);
+      continue;
+    }
+
+    break;
   }
 
   uv_mutex_unlock(&this->mutex);
