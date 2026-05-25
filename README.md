@@ -1,4 +1,4 @@
-**(Warning: this project is still WIP, there are a lot of things (like proper cleanups) not done yet, and right now it shows a minimal working product (without proper cleanups yet!) with Kino. Use at your own risk.**
+**Warning:** this project is still WIP. Some cleanup paths are still incomplete, and the Kino integration currently demonstrates a minimal working product. Use at your own risk.
 
 **Any help/PR is welcome!**
 
@@ -15,8 +15,8 @@
 <td>
 
 ```elixir
-iex> pty = ExPTY.spawn("tty", [], on_data: fn _, _, data -> IO.write(data) end)
-#PID<0.229.0>
+iex> {:ok, pty} = ExPTY.spawn("tty", [], on_data: fn _, _, data -> IO.write(data) end)
+{:ok, #PID<0.229.0>}
 /dev/ttys001
 ```
 
@@ -100,7 +100,7 @@ by adding `ExPTY` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:expty, "~> 0.1.0"}
+    {:expty, "~> 0.2.2"}
   ]
 end
 ```

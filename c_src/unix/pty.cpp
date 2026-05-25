@@ -163,7 +163,9 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[13], helper_path)) {
 
     pty_pipesocket * pipesocket = NULL;
-    ErlNifPid* process = NULL;
+    ErlNifPid* data_process = NULL;
+    ErlNifPid* exit_process = NULL;
+    bool pipesocket_owned_by_thread = false;
     int ret = 0;
     int flags = POSIX_SPAWN_USEVFORK;
 
@@ -296,13 +298,23 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       erl_ret = nif::error(env, "Could not allocate memory for pipesocket resource.");
       goto done;
     }
+    pipesocket->process = NULL;
+    pipesocket->baton = NULL;
 
-    process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
-    if (process == NULL) {
+    data_process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
+    if (data_process == NULL) {
       erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
       goto done;
     }
-    process = enif_self(env, process);
+
+    exit_process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
+    if (exit_process == NULL) {
+      erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
+      goto done;
+    }
+
+    data_process = enif_self(env, data_process);
+    exit_process = enif_self(env, exit_process);
 
     pid_t pid;
     { // suppresses "jump bypasses variable initialization" errors
@@ -341,7 +353,6 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       if (success) {
         pipesocket->fd = master;
         pipesocket->env = env;
-        pipesocket->process = process;
 
         ERL_NIF_TERM pipe_socket = enif_make_resource(env, (void *)pipesocket);
         erl_ret = enif_make_tuple3(env,
@@ -365,7 +376,10 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       baton->exit_code = 0;
       baton->signal_code = 0;
       baton->env = env;
-      baton->process = process;
+      pipesocket->process = data_process;
+      data_process = NULL;
+      baton->process = exit_process;
+      exit_process = NULL;
       baton->pid = pid;
       baton->async.data = baton;
       baton->fd_closed = false;
@@ -378,6 +392,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
       uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
       uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
+      pipesocket_owned_by_thread = true;
       processes[pid] = pipesocket;
     }
 done:
@@ -391,6 +406,15 @@ done:
     if (envs_c) {
       for (int i = 0; i < envc; i++) free(envs_c[i]);
       delete[] envs_c;
+    }
+    if (data_process) {
+      enif_free(data_process);
+    }
+    if (exit_process) {
+      enif_free(exit_process);
+    }
+    if (pipesocket && !pipesocket_owned_by_thread) {
+      enif_release_resource((void *)pipesocket);
     }
   }
 
@@ -583,10 +607,10 @@ pty_pipesocket_fn(void *data) {
     }
 
     if (FD_ISSET(fd, &readfds)) {
-      size_t bytes_read = 0;
       const size_t buf_size = 1024;
       char buffer[buf_size] = {'\0'};
-      bytes_read = read(fd, buffer, buf_size);
+      ssize_t bytes_read = read(fd, buffer, buf_size);
+
       if (bytes_read == 0) {
         pipesocket->baton->fd_closed = true;
         close(fd);
@@ -594,18 +618,30 @@ pty_pipesocket_fn(void *data) {
         break;
       }
 
+      if (bytes_read < 0) {
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+          continue;
+        }
+
+        pipesocket->baton->fd_closed = true;
+        close(fd);
+        break;
+      }
+
       ERL_NIF_TERM dataread;
       unsigned char * ptr;
+      size_t bytes_read_size = static_cast<size_t>(bytes_read);
 
       ErlNifEnv * msg_env = enif_alloc_env();
-      if ((ptr = enif_make_new_binary(msg_env, bytes_read, &dataread)) != nullptr) {
-        memcpy(ptr, buffer, bytes_read);
+      if ((ptr = enif_make_new_binary(msg_env, bytes_read_size, &dataread)) != nullptr) {
+        memcpy(ptr, buffer, bytes_read_size);
         enif_send(NULL, pipesocket->process, msg_env, enif_make_tuple2(msg_env,
           nif::atom(msg_env, "data"),
           dataread
         ));
-        enif_free_env(msg_env);
       }
+
+      enif_free_env(msg_env);
     }
   }
 
@@ -618,10 +654,11 @@ size_t pty_pipesocket::write(void * data, size_t len) {
   }
 
   uv_mutex_lock(&this->mutex);
+  const char *buffer = static_cast<const char *>(data);
   size_t bytes_to_write = len, bytes_written = 0, buffer_size = 1024, nbytes = 0;
   size_t retry = 3;
 
-  while (true) {
+  while (bytes_written < len) {
     nbytes = buffer_size;
     if (buffer_size > bytes_to_write) {
       nbytes = bytes_to_write;
@@ -631,18 +668,30 @@ size_t pty_pipesocket::write(void * data, size_t len) {
       break;
     }
 
-    ssize_t bytes_written_cur = ::write(this->fd, ((void *)(int64_t *)(((size_t)(char *)data) + bytes_written)), nbytes);
+    ssize_t bytes_written_cur = ::write(this->fd, buffer + bytes_written, nbytes);
     if (bytes_written_cur > 0) {
       bytes_written += bytes_written_cur;
       bytes_to_write -= bytes_written_cur;
+      retry = 3;
       if (bytes_written == len) {
         break;
       }
-    } else {
-      if (retry-- > 0) {
-        usleep(10);
-      }
+      continue;
     }
+
+    if (bytes_written_cur == -1 && errno == EINTR) {
+      continue;
+    }
+
+    if (bytes_written_cur == -1 &&
+        (errno == EAGAIN || errno == EWOULDBLOCK) &&
+        retry > 0) {
+      retry--;
+      usleep(10);
+      continue;
+    }
+
+    break;
   }
 
   uv_mutex_unlock(&this->mutex);

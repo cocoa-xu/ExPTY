@@ -10,7 +10,7 @@ defmodule ExPTY.MixProject do
       version: @version,
       elixir: "~> 1.12",
       name: "ExPTY",
-      description: "`forkpty(3)` bindings for elixir",
+      description: "`forkpty(3)` bindings for Elixir",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
