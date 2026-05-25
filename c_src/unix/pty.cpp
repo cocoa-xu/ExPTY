@@ -85,8 +85,7 @@
 
 struct pty_baton {
   ErlNifEnv *env;
-  ErlNifPid * process;
-  bool fd_closed;
+  ErlNifPid process;
   int exit_code;
   int signal_code;
   pid_t pid;
@@ -96,11 +95,11 @@ struct pty_baton {
 
 typedef struct pty_pipesocket_ {
   int fd;
-
-  pty_baton * baton;
+  pid_t pid;
+  bool fd_closed;
 
   ErlNifEnv * env;
-  ErlNifPid * process;
+  ErlNifPid process;
 
   uv_async_t async;
   uv_thread_t tid;
@@ -125,12 +124,16 @@ static void pty_after_pipesocket(uv_async_t *);
 static void pty_after_close_pipesocket(uv_handle_t *);
 
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
+static void pty_close_fd(int *fd);
+static int pty_cloexec(int fd);
+static int pty_kill_process_group(pid_t pid, int signal);
+static void pty_reap(pid_t pid);
 
 static std::map<pid_t, pty_pipesocket *> processes;
 
 static void __attribute__((destructor)) cleanup() {
   for (auto p : processes) {
-    kill(p.first, SIGTERM);
+    pty_kill_process_group(p.first, SIGTERM);
   }
 }
 
@@ -163,11 +166,20 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[13], helper_path)) {
 
     pty_pipesocket * pipesocket = NULL;
-    ErlNifPid* data_process = NULL;
-    ErlNifPid* exit_process = NULL;
-    bool pipesocket_owned_by_thread = false;
     int ret = 0;
     int flags = POSIX_SPAWN_USEVFORK;
+    int master = -1;
+    int slave = -1;
+    int comms_pipe[2] = {-1, -1};
+    bool keep_master = false;
+    bool restore_signal_mask = false;
+    sigset_t newmask, oldmask;
+    posix_spawn_file_actions_t acts;
+    bool acts_initialized = false;
+    posix_spawnattr_t attrs;
+    bool attrs_initialized = false;
+    ErlNifPid process;
+    pid_t pid = -1;
 
     int envc = (int)envs.size();
     char ** envs_c = new char*[envc+1];
@@ -256,38 +268,40 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     cfsetispeed(term, ibaudrate);
     cfsetospeed(term, obaudrate);
 
-    sigset_t newmask, oldmask;
-
-    // temporarily block all signals
-    // this is needed due to a race condition in openpty
-    // and to avoid running signal handlers in the child
-    // before exec* happened
     sigfillset(&newmask);
     pthread_sigmask(SIG_SETMASK, &newmask, &oldmask);
+    restore_signal_mask = true;
 
-    int master, slave;
     ret = pty_openpty(&master, &slave, nullptr, term, &winp);
     if (ret == -1) {
       erl_ret = nif::error(env, "openpty() failed.");
       goto done;
     }
 
-    int comms_pipe[2];
+    if (pty_cloexec(master) == -1 || pty_cloexec(slave) == -1) {
+      erl_ret = nif::error(env, "fcntl(FD_CLOEXEC) failed.");
+      goto done;
+    }
+
     if (pipe(comms_pipe)) {
       erl_ret = nif::error(env, "pipe() failed.");
       goto done;
     }
+    if (pty_cloexec(comms_pipe[0]) == -1 || pty_cloexec(comms_pipe[1]) == -1) {
+      erl_ret = nif::error(env, "fcntl(FD_CLOEXEC) failed.");
+      goto done;
+    }
 
-    posix_spawn_file_actions_t acts;
     posix_spawn_file_actions_init(&acts);
+    acts_initialized = true;
     posix_spawn_file_actions_adddup2(&acts, slave, STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&acts, slave, STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&acts, slave, STDERR_FILENO);
     posix_spawn_file_actions_adddup2(&acts, comms_pipe[1], COMM_PIPE_FD);
     posix_spawn_file_actions_addclose(&acts, comms_pipe[1]);
 
-    posix_spawnattr_t attrs;
     posix_spawnattr_init(&attrs);
+    attrs_initialized = true;
     if (closeFDs) {
       flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
     }
@@ -298,32 +312,17 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       erl_ret = nif::error(env, "Could not allocate memory for pipesocket resource.");
       goto done;
     }
-    pipesocket->process = NULL;
-    pipesocket->baton = NULL;
 
-    data_process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
-    if (data_process == NULL) {
-      erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
-      goto done;
-    }
+    enif_self(env, &process);
 
-    exit_process = (ErlNifPid *)enif_alloc(sizeof(ErlNifPid));
-    if (exit_process == NULL) {
-      erl_ret = nif::error(env, "cannot allocate memory for ErlNifPid.");
-      goto done;
-    }
-
-    data_process = enif_self(env, data_process);
-    exit_process = enif_self(env, exit_process);
-
-    pid_t pid;
     { // suppresses "jump bypasses variable initialization" errors
       auto error = posix_spawn(&pid, argv[0], &acts, &attrs, argv, envs_c);
 
-      close(comms_pipe[1]);
+      pty_close_fd(&comms_pipe[1]);
+      pty_close_fd(&slave);
 
-      // reenable signals
       pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+      restore_signal_mask = false;
 
       if (error) {
         erl_ret = throw_for_errno(env, "posix_spawn failed: ", error);
@@ -332,7 +331,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
 
       int helper_error[2];
       auto bytes_read = read(comms_pipe[0], &helper_error, sizeof(helper_error));
-      close(comms_pipe[0]);
+      pty_close_fd(&comms_pipe[0]);
 
       if (bytes_read == sizeof(helper_error)) {
         if (helper_error[0] == COMM_ERR_EXEC) {
@@ -343,48 +342,55 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
           erl_ret = throw_for_errno(env, "setuid() failed: ", helper_error[1]);
         } else if (helper_error[0] == COMM_ERR_SETGID) {
           erl_ret = throw_for_errno(env, "setgid() failed: ", helper_error[1]);
+        } else if (helper_error[0] == COMM_ERR_SETSID) {
+          erl_ret = throw_for_errno(env, "setsid() failed: ", helper_error[1]);
+        } else if (helper_error[0] == COMM_ERR_TIOCSCTTY) {
+          erl_ret = throw_for_errno(env, "ioctl(TIOCSCTTY) failed: ", helper_error[1]);
         }
+        pty_reap(pid);
         goto done;
       }
 
       bool success = false;
-      ERL_NIF_TERM ptsname_ = nif::make_string(env, ptsname(master), success);
+      char *pty_name = ptsname(master);
+      ERL_NIF_TERM ptsname_ = pty_name == nullptr ? 0 : nif::make_string(env, pty_name, success);
 
-      if (success) {
-        pipesocket->fd = master;
-        pipesocket->env = env;
-
-        ERL_NIF_TERM pipe_socket = enif_make_resource(env, (void *)pipesocket);
-        erl_ret = enif_make_tuple3(env,
-          pipe_socket,
-          enif_make_int(env, pid),
-          ptsname_
-        );
-      } else {
+      if (!success) {
         erl_ret = nif::error(env, "Could not allocate memory for ptsname.");
-        kill(pid, SIGKILL);
+        pty_kill_process_group(pid, SIGKILL);
+        pty_reap(pid);
         goto done;
       }
 
       if (pty_nonblock(master) == -1) {
         erl_ret = nif::error(env, "Could not set master fd to nonblocking.");
-        kill(pid, SIGKILL);
+        pty_kill_process_group(pid, SIGKILL);
+        pty_reap(pid);
         goto done;
       }
+
+      pipesocket->fd = master;
+      pipesocket->pid = pid;
+      pipesocket->fd_closed = false;
+      keep_master = true;
+      pipesocket->env = env;
+      pipesocket->process = process;
+
+      ERL_NIF_TERM pipe_socket = enif_make_resource(env, (void *)pipesocket);
+      erl_ret = enif_make_tuple3(env,
+        pipe_socket,
+        enif_make_int(env, pid),
+        ptsname_
+      );
 
       pty_baton *baton = new pty_baton();
       baton->exit_code = 0;
       baton->signal_code = 0;
       baton->env = env;
-      pipesocket->process = data_process;
-      data_process = NULL;
-      baton->process = exit_process;
-      exit_process = NULL;
+      baton->process = process;
       baton->pid = pid;
       baton->async.data = baton;
-      baton->fd_closed = false;
 
-      pipesocket->baton = baton;
       pipesocket->async.data = pipesocket;
       uv_mutex_init(&pipesocket->mutex);
       uv_async_init(uv_default_loop(), &pipesocket->async, pty_after_pipesocket);
@@ -392,12 +398,27 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
       uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
       uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
-      pipesocket_owned_by_thread = true;
       processes[pid] = pipesocket;
     }
 done:
-    posix_spawn_file_actions_destroy(&acts);
-    posix_spawnattr_destroy(&attrs);
+    if (restore_signal_mask) {
+      pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+    }
+    if (!keep_master) {
+      pty_close_fd(&master);
+    }
+    pty_close_fd(&slave);
+    pty_close_fd(&comms_pipe[0]);
+    pty_close_fd(&comms_pipe[1]);
+    if (acts_initialized) {
+      posix_spawn_file_actions_destroy(&acts);
+    }
+    if (attrs_initialized) {
+      posix_spawnattr_destroy(&attrs);
+    }
+    if (pipesocket != NULL && !keep_master) {
+      enif_release_resource((void *)pipesocket);
+    }
 
     if (argv) {
       for (int i = 0; i < argl; i++) free(argv[i]);
@@ -406,15 +427,6 @@ done:
     if (envs_c) {
       for (int i = 0; i < envc; i++) free(envs_c[i]);
       delete[] envs_c;
-    }
-    if (data_process) {
-      enif_free(data_process);
-    }
-    if (exit_process) {
-      enif_free(exit_process);
-    }
-    if (pipesocket && !pipesocket_owned_by_thread) {
-      enif_release_resource((void *)pipesocket);
     }
   }
 
@@ -452,9 +464,11 @@ static ERL_NIF_TERM expty_kill(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
   int signal = 0;
   if (enif_get_resource(env, argv[0], pty_pipesocket::type, (void **)&pipesocket) && pipesocket &&
       nif::get(env, argv[1], &signal) && signal > 0) {
-    kill(pipesocket->baton->pid, signal);
-    processes.erase(pipesocket->baton->pid);
-    erl_ret = nif::atom(env, "ok");
+    if (pty_kill_process_group(pipesocket->pid, signal) == -1 && errno != ESRCH) {
+      erl_ret = throw_for_errno(env, "kill() failed: ", errno);
+    } else {
+      erl_ret = nif::atom(env, "ok");
+    }
   } else {
     erl_ret = nif::error(env, "Cannot get pipesocket resource");
   }
@@ -596,14 +610,20 @@ pty_pipesocket_fn(void *data) {
   int fd = pipesocket->fd;
   int activity;
 
-  while (!pipesocket->baton->fd_closed) {
+  while (!pipesocket->fd_closed) {
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(fd, &readfds);
     activity = select(fd + 1, &readfds, NULL, NULL, NULL);
 
-    if ((activity < 0) && (errno != EINTR)) {
-      continue;
+    if (activity < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      pipesocket->fd_closed = true;
+      close(fd);
+      pty_kill_process_group(pipesocket->pid, SIGHUP);
+      break;
     }
 
     if (FD_ISSET(fd, &readfds)) {
@@ -612,19 +632,18 @@ pty_pipesocket_fn(void *data) {
       ssize_t bytes_read = read(fd, buffer, buf_size);
 
       if (bytes_read == 0) {
-        pipesocket->baton->fd_closed = true;
+        pipesocket->fd_closed = true;
         close(fd);
-        kill(pipesocket->baton->pid, SIGHUP);
+        pty_kill_process_group(pipesocket->pid, SIGHUP);
         break;
       }
-
-      if (bytes_read < 0) {
+      if (bytes_read == -1) {
         if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
           continue;
         }
-
-        pipesocket->baton->fd_closed = true;
+        pipesocket->fd_closed = true;
         close(fd);
+        pty_kill_process_group(pipesocket->pid, SIGHUP);
         break;
       }
 
@@ -635,7 +654,7 @@ pty_pipesocket_fn(void *data) {
       ErlNifEnv * msg_env = enif_alloc_env();
       if ((ptr = enif_make_new_binary(msg_env, bytes_read_size, &dataread)) != nullptr) {
         memcpy(ptr, buffer, bytes_read_size);
-        enif_send(NULL, pipesocket->process, msg_env, enif_make_tuple2(msg_env,
+        enif_send(NULL, &pipesocket->process, msg_env, enif_make_tuple2(msg_env,
           nif::atom(msg_env, "data"),
           dataread
         ));
@@ -649,7 +668,7 @@ pty_pipesocket_fn(void *data) {
 }
 
 size_t pty_pipesocket::write(void * data, size_t len) {
-  if (this->baton->fd_closed) {
+  if (this->fd_closed) {
     return 0;
   }
 
@@ -664,7 +683,7 @@ size_t pty_pipesocket::write(void * data, size_t len) {
       nbytes = bytes_to_write;
     }
 
-    if (this->baton->fd_closed) {
+    if (this->fd_closed) {
       break;
     }
 
@@ -727,14 +746,12 @@ static void pty_waitpid(void *data) {
   }
 
   ErlNifEnv * msg_env = enif_alloc_env();
-  enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env,
+  enif_send(NULL, &baton->process, msg_env, enif_make_tuple3(msg_env,
     nif::atom(msg_env, "exit"),
     enif_make_int(msg_env, baton->exit_code),
     enif_make_int(msg_env, baton->signal_code)
   ));
   enif_free_env(msg_env);
-  enif_free(baton->process);
-  baton->process = NULL;
 
   uv_async_send(&baton->async);
   processes.erase(baton->pid);
@@ -771,10 +788,38 @@ static void
 pty_after_close_pipesocket(uv_handle_t *handle) {
   uv_async_t *async = (uv_async_t *)handle;
   pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(async->data);
-  enif_free(pipesocket->process);
-  pipesocket->process = NULL;
   uv_mutex_destroy(&pipesocket->mutex);
   enif_release_resource((void *)pipesocket);
+}
+
+static void pty_close_fd(int *fd) {
+  if (*fd != -1) {
+    close(*fd);
+    *fd = -1;
+  }
+}
+
+static int pty_cloexec(int fd) {
+  int flags = fcntl(fd, F_GETFD, 0);
+  if (flags == -1) return -1;
+  return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
+static int pty_kill_process_group(pid_t pid, int signal) {
+  if (pid <= 0) {
+    errno = ESRCH;
+    return -1;
+  }
+  int ret = kill(-pid, signal);
+  if (ret == -1 && errno == ESRCH) {
+    ret = kill(pid, signal);
+  }
+  return ret;
+}
+
+static void pty_reap(pid_t pid) {
+  int status;
+  while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
 }
 
 /**

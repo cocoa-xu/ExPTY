@@ -21,19 +21,24 @@ int main (int argc, char** argv) {
   sigemptyset(&empty_set);
   pthread_sigmask(SIG_SETMASK, &empty_set, nullptr);
 
-  setsid();
+  if (setsid() == -1) {
+    bail(COMM_ERR_SETSID, errno);
+  }
 
 #if defined(TIOCSCTTY)
-  // glibc does this
   if (ioctl(STDIN_FILENO, TIOCSCTTY, NULL) == -1) {
-    _exit(1);
+    bail(COMM_ERR_TIOCSCTTY, errno);
   }
 #else
   char *slave_path = ttyname(STDIN_FILENO);
-  // open implicit attaches a process to a terminal device if:
-  // - process has no controlling terminal yet
-  // - O_NOCTTY is not set
-  close(open(slave_path, O_RDWR));
+  if (slave_path == nullptr) {
+    bail(COMM_ERR_TIOCSCTTY, errno);
+  }
+  int slave = open(slave_path, O_RDWR);
+  if (slave == -1) {
+    bail(COMM_ERR_TIOCSCTTY, errno);
+  }
+  close(slave);
 #endif
 
   char *cwd = argv[1];
@@ -48,11 +53,11 @@ int main (int argc, char** argv) {
   if (strlen(cwd) && chdir(cwd) == -1) {
     bail(COMM_ERR_CHDIR, errno);
   }
-  if (uid != -1 && setuid(uid) == -1) {
-    bail(COMM_ERR_SETUID, errno);
-  }
   if (gid != -1 && setgid(gid) == -1) {
     bail(COMM_ERR_SETGID, errno);
+  }
+  if (uid != -1 && setuid(uid) == -1) {
+    bail(COMM_ERR_SETUID, errno);
   }
   if (closeFDs) {
     struct rlimit rlim_ofile;

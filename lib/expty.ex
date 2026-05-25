@@ -248,7 +248,9 @@ defmodule ExPTY do
   end
 
   @doc """
-  Kill the process with given signal.
+  Send the given signal to the spawned process.
+
+  On Unix, the signal is sent to the spawned process group.
   """
   @spec kill(pid(), integer()) :: :ok | :not_implemented_yet | {:error, String.t()}
   def kill(pty, signal) when is_integer(signal) do
