@@ -1,6 +1,6 @@
 #include <sys/types.h>
 #include "common.h"
-#include <mutex>
+#include <new>
 #include <set>
 #include <string>
 #include <vector>
@@ -130,35 +130,58 @@ static int pty_cloexec(int fd);
 static int pty_kill_process_group(pid_t pid, int signal);
 static void pty_reap(pid_t pid);
 
+class nif_lock_guard {
+public:
+  explicit nif_lock_guard(ErlNifMutex *mutex) : mutex(mutex) {
+    enif_mutex_lock(mutex);
+  }
+
+  ~nif_lock_guard() {
+    enif_mutex_unlock(mutex);
+  }
+
+  nif_lock_guard(const nif_lock_guard &) = delete;
+  nif_lock_guard &operator=(const nif_lock_guard &) = delete;
+
+private:
+  ErlNifMutex *mutex;
+};
+
 class process_registry {
 public:
+  explicit process_registry(ErlNifMutex *mutex) : mutex(mutex) {}
+
   void insert(pid_t pid) {
-    std::lock_guard<std::mutex> lock(mutex);
+    nif_lock_guard lock(mutex);
     pids.insert(pid);
   }
 
   void erase(pid_t pid) {
-    std::lock_guard<std::mutex> lock(mutex);
+    nif_lock_guard lock(mutex);
     pids.erase(pid);
   }
 
   std::vector<pid_t> snapshot() {
-    std::lock_guard<std::mutex> lock(mutex);
+    nif_lock_guard lock(mutex);
     return std::vector<pid_t>(pids.begin(), pids.end());
   }
 
 private:
-  std::mutex mutex;
+  ErlNifMutex *mutex;
   std::set<pid_t> pids;
 };
 
 // Native threads can outlive static destructors during library teardown.
-static process_registry &processes = *new process_registry();
-static std::mutex &spawn_mutex = *new std::mutex();
+static char processes_mutex_name[] = "ExPTY.ProcessRegistry";
+static char spawn_mutex_name[] = "ExPTY.Spawn";
+static process_registry *processes = nullptr;
+static ErlNifMutex *spawn_mutex = nullptr;
 
 static void __attribute__((destructor)) cleanup() {
-  std::lock_guard<std::mutex> lock(spawn_mutex);
-  for (pid_t pid : processes.snapshot()) {
+  if (processes == nullptr || spawn_mutex == nullptr) return;
+
+  nif_lock_guard lock(spawn_mutex);
+  for (pid_t pid : processes->snapshot()) {
     pty_kill_process_group(pid, SIGTERM);
   }
 }
@@ -191,7 +214,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[12], &echo) &&
       nif::get(env, argv[13], helper_path)) {
 
-    std::lock_guard<std::mutex> spawn_lock(spawn_mutex);
+    nif_lock_guard spawn_lock(spawn_mutex);
     pty_pipesocket * pipesocket = NULL;
     int ret = 0;
     int flags = POSIX_SPAWN_USEVFORK;
@@ -424,7 +447,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       uv_async_init(uv_default_loop(), &pipesocket->async, pty_after_pipesocket);
 
       uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
-      processes.insert(pid);
+      processes->insert(pid);
       uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
       uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
     }
@@ -781,7 +804,7 @@ static void pty_waitpid(void *data) {
   enif_free_env(msg_env);
 
   uv_async_send(&baton->async);
-  processes.erase(baton->pid);
+  processes->erase(baton->pid);
 }
 
 /**
@@ -898,7 +921,26 @@ static int on_load(ErlNifEnv * env, void **, ERL_NIF_TERM) {
   ErlNifResourceType *rt;
   rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", NULL, ERL_NIF_RT_CREATE, NULL);
   if (!rt) return -1;
+
+  ErlNifMutex *processes_mutex = enif_mutex_create(processes_mutex_name);
+  if (processes_mutex == nullptr) return -1;
+
+  ErlNifMutex *new_spawn_mutex = enif_mutex_create(spawn_mutex_name);
+  if (new_spawn_mutex == nullptr) {
+    enif_mutex_destroy(processes_mutex);
+    return -1;
+  }
+
+  process_registry *new_processes = new (std::nothrow) process_registry(processes_mutex);
+  if (new_processes == nullptr) {
+    enif_mutex_destroy(new_spawn_mutex);
+    enif_mutex_destroy(processes_mutex);
+    return -1;
+  }
+
   pty_pipesocket::type = rt;
+  processes = new_processes;
+  spawn_mutex = new_spawn_mutex;
   return 0;
 }
 
