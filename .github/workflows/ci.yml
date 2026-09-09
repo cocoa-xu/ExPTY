@@ -27,10 +27,10 @@ jobs:
           otp-version: 25.3
           elixir-version: 1.14
 
-      - name: Compile
+      - name: Compile and Test
         run: |
           mix deps.get
-          mix compile
+          mix test
 
   windows:
     runs-on: windows-2022

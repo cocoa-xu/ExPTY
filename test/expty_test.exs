@@ -85,8 +85,19 @@ defmodule ExPTYTest do
   end
 
   defp process_alive?(pid) do
-    case System.cmd("kill", ["-0", Integer.to_string(pid)], stderr_to_stdout: true) do
-      {_, 0} -> true
+    if zombie_process?(pid) do
+      false
+    else
+      case System.cmd("kill", ["-0", Integer.to_string(pid)], stderr_to_stdout: true) do
+        {_, 0} -> true
+        _ -> false
+      end
+    end
+  end
+
+  defp zombie_process?(pid) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, status} -> Regex.match?(~r/^\d+ \(.*\) Z /, status)
       _ -> false
     end
   end
