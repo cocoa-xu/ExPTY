@@ -1,8 +1,9 @@
 #include <sys/types.h>
 #include "common.h"
-#include <vector>
-#include <map>
+#include <mutex>
+#include <set>
 #include <string>
+#include <vector>
 
 #include <errno.h>
 #include <string.h>
@@ -129,11 +130,36 @@ static int pty_cloexec(int fd);
 static int pty_kill_process_group(pid_t pid, int signal);
 static void pty_reap(pid_t pid);
 
-static std::map<pid_t, pty_pipesocket *> processes;
+class process_registry {
+public:
+  void insert(pid_t pid) {
+    std::lock_guard<std::mutex> lock(mutex);
+    pids.insert(pid);
+  }
+
+  void erase(pid_t pid) {
+    std::lock_guard<std::mutex> lock(mutex);
+    pids.erase(pid);
+  }
+
+  std::vector<pid_t> snapshot() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return std::vector<pid_t>(pids.begin(), pids.end());
+  }
+
+private:
+  std::mutex mutex;
+  std::set<pid_t> pids;
+};
+
+// Native threads can outlive static destructors during library teardown.
+static process_registry &processes = *new process_registry();
+static std::mutex &spawn_mutex = *new std::mutex();
 
 static void __attribute__((destructor)) cleanup() {
-  for (auto p : processes) {
-    pty_kill_process_group(p.first, SIGTERM);
+  std::lock_guard<std::mutex> lock(spawn_mutex);
+  for (pid_t pid : processes.snapshot()) {
+    pty_kill_process_group(pid, SIGTERM);
   }
 }
 
@@ -165,6 +191,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       nif::get(env, argv[12], &echo) &&
       nif::get(env, argv[13], helper_path)) {
 
+    std::lock_guard<std::mutex> spawn_lock(spawn_mutex);
     pty_pipesocket * pipesocket = NULL;
     int ret = 0;
     int flags = POSIX_SPAWN_USEVFORK;
@@ -268,6 +295,7 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
     cfsetispeed(term, ibaudrate);
     cfsetospeed(term, obaudrate);
 
+    signal(SIGCHLD, SIG_DFL);
     sigfillset(&newmask);
     pthread_sigmask(SIG_SETMASK, &newmask, &oldmask);
     restore_signal_mask = true;
@@ -396,9 +424,9 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       uv_async_init(uv_default_loop(), &pipesocket->async, pty_after_pipesocket);
 
       uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
+      processes.insert(pid);
       uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
       uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
-      processes[pid] = pipesocket;
     }
 done:
     if (restore_signal_mask) {
@@ -730,7 +758,6 @@ static void pty_waitpid(void *data) {
 
   errno = 0;
 
-  signal(SIGCHLD, SIG_DFL);
   if ((ret = waitpid(baton->pid, &stat_loc, 0)) != baton->pid) {
     if (ret == -1 && errno == EINTR) {
       return pty_waitpid(baton);

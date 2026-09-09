@@ -1,12 +1,18 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <termios.h>
 #include <unistd.h>
 #include <string.h>
+
+#if defined(__linux__)
+#include <dirent.h>
+#include <sys/syscall.h>
+#endif
 
 #include "common.h"
 
@@ -16,7 +22,44 @@ void bail (int type, int code) {
   _exit(1);
 }
 
-int main (int argc, char** argv) {
+static void close_inherited_fds () {
+#if defined(__linux__)
+#if defined(SYS_close_range)
+  if (syscall(SYS_close_range, COMM_PIPE_FD + 1, ~0U, 0) == 0) {
+    return;
+  }
+#endif
+
+  DIR *directory = opendir("/proc/self/fd");
+  if (directory != nullptr) {
+    int directory_fd = dirfd(directory);
+    struct dirent *entry;
+
+    while ((entry = readdir(directory)) != nullptr) {
+      char *end;
+      long fd = strtol(entry->d_name, &end, 10);
+
+      if (*entry->d_name != '\0' &&
+          *end == '\0' &&
+          fd > COMM_PIPE_FD &&
+          fd != directory_fd) {
+        close(static_cast<int>(fd));
+      }
+    }
+
+    closedir(directory);
+    return;
+  }
+#endif
+
+  struct rlimit limit;
+  getrlimit(RLIMIT_NOFILE, &limit);
+  for (rlim_t fd = COMM_PIPE_FD + 1; fd < limit.rlim_cur; fd++) {
+    close(static_cast<int>(fd));
+  }
+}
+
+int main (int, char** argv) {
   sigset_t empty_set;
   sigemptyset(&empty_set);
   pthread_sigmask(SIG_SETMASK, &empty_set, nullptr);
@@ -60,13 +103,7 @@ int main (int argc, char** argv) {
     bail(COMM_ERR_SETUID, errno);
   }
   if (closeFDs) {
-    struct rlimit rlim_ofile;
-    getrlimit(RLIMIT_NOFILE, &rlim_ofile);
-    for (rlim_t fd = STDERR_FILENO + 1; fd < rlim_ofile.rlim_cur; fd++) {
-      if (fd != COMM_PIPE_FD) {
-        close(fd);
-      }
-    }
+    close_inherited_fds();
   }
 
   execvp(file, argv);

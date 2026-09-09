@@ -180,6 +180,12 @@ defmodule ExPTY do
 
     Defaults to `utf-8`. This keyword parameter will probably be removed in the first release.
 
+  - `close_fds`: `boolean()`
+
+    Whether to close inherited file descriptors other than standard input, output, and error.
+
+    Defaults to `true`.
+
   - `handle_flow_control`: `boolean()`
 
     Defaults to `false`.
@@ -365,7 +371,7 @@ defmodule ExPTY do
           uid = options[:uid] || -2
           gid = options[:gid] || -2
           is_utf8 = options[:encoding] == "utf-8"
-          close_fds = Keyword.get(options, :close_fds, Keyword.get(options, :closeFDs, false))
+          close_fds = Keyword.get(options, :close_fds, Keyword.get(options, :closeFDs, true))
           echo? = options[:echo?] || false
           helper_path = ExPTY.Nif.helper_path()
 
