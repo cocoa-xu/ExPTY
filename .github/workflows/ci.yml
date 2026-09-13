@@ -27,10 +27,14 @@ jobs:
           otp-version: 25.3
           elixir-version: 1.14
 
+      - name: Install dependencies
+        run: mix deps.get
+
       - name: Compile
-        run: |
-          mix deps.get
-          mix compile
+        run: mix compile
+
+      - name: Test
+        run: mix test --no-compile
 
   windows:
     runs-on: windows-2022
@@ -48,11 +52,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Install dependencies
+        shell: bash
+        run: mix deps.get
+
       - name: Compile
         shell: bash
-        run: |
-          mix deps.get
-          mix compile
+        run: mix compile
+
+      - name: Test
+        shell: bash
+        run: mix test --no-compile
 
   macos:
     runs-on: macos-14
@@ -69,15 +79,18 @@ jobs:
         run: |
           curl -fsSO https://elixir-lang.org/install.sh
           sh install.sh "elixir@${ELIXIR_VERSION}" "otp@${OTP_VERSION}"
-
-      - name: Compile and Test
-        run: |
           export OTP_MAIN_VER="${OTP_VERSION%%.*}"
-          export PATH=$HOME/.elixir-install/installs/otp/${OTP_VERSION}/bin:$PATH
-          export PATH=$HOME/.elixir-install/installs/elixir/${ELIXIR_VERSION}-otp-${OTP_MAIN_VER}/bin:$PATH
+          echo "$HOME/.elixir-install/installs/otp/${OTP_VERSION}/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.elixir-install/installs/elixir/${ELIXIR_VERSION}-otp-${OTP_MAIN_VER}/bin" >> "$GITHUB_PATH"
 
+      - name: Install dependencies
+        run: |
           mix local.hex --force
           mix local.rebar --force
-
           mix deps.get
-          mix compile
+
+      - name: Compile
+        run: mix compile
+
+      - name: Test
+        run: mix test --no-compile
