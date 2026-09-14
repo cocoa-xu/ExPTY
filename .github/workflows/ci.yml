@@ -20,33 +20,65 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
+      OTP_VERSION: "25.3"
+      ELIXIR_VERSION: "1.14.5"
     steps:
-      - uses: actions/checkout@v5
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@v7
+
+      - name: Install OTP
+        uses: cocoa-xu/otp-build@v1
         with:
-          otp-version: 25.3
-          elixir-version: 1.14
+          otp_version: ${{ env.OTP_VERSION }}
+
+      - name: Install Elixir
+        run: |
+          otp_release="${OTP_VERSION%%.*}"
+          elixir_dir="$GITHUB_WORKSPACE/.elixir"
+          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          mkdir -p "$elixir_dir"
+          unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
+
+      - name: Start Linux container
+        run: |
+          docker run --rm --detach --name expty-linux \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            --env MIX_ENV \
+            --env ERL_ROOTDIR=/workspace/.otp/usr/local/lib/erlang \
+            --env PATH=/workspace/.otp/usr/local/bin:/workspace/.elixir/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            ubuntu:20.04 sleep infinity
+          docker exec --env DEBIAN_FRONTEND=noninteractive expty-linux \
+            bash -c "apt-get update && apt-get install -y build-essential ca-certificates cmake git libtinfo5 ninja-build pkg-config"
 
       - name: Install dependencies
-        run: mix deps.get
+        run: |
+          docker exec expty-linux mix local.hex --force
+          docker exec expty-linux mix local.rebar --force
+          docker exec expty-linux mix deps.get
 
       - name: Compile
-        run: mix compile
+        run: docker exec expty-linux mix compile
 
       - name: Test
-        run: mix test --no-compile
+        run: docker exec expty-linux mix test --no-compile
+
+      - name: Stop Linux container
+        if: always()
+        run: docker stop expty-linux
 
   windows:
     runs-on: windows-2022
     env:
       MIX_ENV: test
+      OTP_VERSION: "25"
+      ELIXIR_VERSION: "1.14"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: 25
-          elixir-version: 1.14
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -65,7 +97,7 @@ jobs:
         run: mix test --no-compile
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-15-intel
     env:
       MIX_ENV: test
       OTP_VERSION: "26.2.1"
@@ -73,15 +105,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Install OTP and Elixir
+      - name: Install OTP
+        uses: cocoa-xu/otp-build@v1
+        with:
+          otp_version: ${{ env.OTP_VERSION }}
+
+      - name: Install Elixir
         run: |
-          curl -fsSO https://elixir-lang.org/install.sh
-          sh install.sh "elixir@${ELIXIR_VERSION}" "otp@${OTP_VERSION}"
-          export OTP_MAIN_VER="${OTP_VERSION%%.*}"
-          echo "$HOME/.elixir-install/installs/otp/${OTP_VERSION}/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.elixir-install/installs/elixir/${ELIXIR_VERSION}-otp-${OTP_MAIN_VER}/bin" >> "$GITHUB_PATH"
+          otp_release="${OTP_VERSION%%.*}"
+          elixir_dir="$RUNNER_TEMP/elixir"
+          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          mkdir -p "$elixir_dir"
+          unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
+          echo "$elixir_dir/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: |
