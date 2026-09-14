@@ -1,133 +1,170 @@
 name: precompile
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/precompile.yml"
   push:
     tags:
-      - 'v*'
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to rebuild and publish
+        required: false
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   linux:
     runs-on: ubuntu-latest
-    env:
-      MIX_ENV: prod
     strategy:
       matrix:
-        otp_version: [25]
+        include:
+          - otp_version: "25.3.2.8"
+            elixir_version: "1.15.8"
+    env:
+      MIX_ENV: prod
+      OTP_VERSION: ${{ matrix.otp_version }}
+      ELIXIR_VERSION: ${{ matrix.elixir_version }}
 
     name: Linux GNU - OTP ${{ matrix.otp_version }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
-
-      - uses: erlef/setup-beam@v1
+        uses: actions/checkout@v7
         with:
-          otp-version: ${{ matrix.otp_version }}
-          elixir-version: 1.15
+          ref: ${{ inputs.release_tag || github.ref }}
 
-      - name: Install system dependecies
+      - name: Install OTP
+        uses: cocoa-xu/otp-build@v1
+        with:
+          otp_version: ${{ env.OTP_VERSION }}
+
+      - name: Install Elixir
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential automake autoconf pkg-config bc m4 unzip zip \
-            gcc g++ \
-            gcc-i686-linux-gnu g++-i686-linux-gnu \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
-            gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
-            gcc-powerpc64le-linux-gnu g++-powerpc64le-linux-gnu \
-            gcc-s390x-linux-gnu g++-s390x-linux-gnu
+          otp_release="${OTP_VERSION%%.*}"
+          elixir_dir="$GITHUB_WORKSPACE/.elixir"
+          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          mkdir -p "$elixir_dir"
+          unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
 
       - name: Precompile
         run: |
-          export ELIXIR_MAKE_CACHE_DIR=$(pwd)/cache
-          mkdir -p "${ELIXIR_MAKE_CACHE_DIR}"
-          mix deps.get
-          mix elixir_make.precompile
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            --env MIX_ENV \
+            --env ERL_ROOTDIR=/workspace/.otp/usr/local/lib/erlang \
+            --env ELIXIR_MAKE_CACHE_DIR=/workspace/cache \
+            --env PATH=/workspace/.otp/usr/local/bin:/workspace/.elixir/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            ubuntu:20.04 bash -c '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y build-essential automake autoconf pkg-config bc m4 unzip zip \
+                ca-certificates cmake git libtinfo5 ninja-build \
+                gcc g++ \
+                gcc-i686-linux-gnu g++-i686-linux-gnu \
+                gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+                gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+                gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
+                gcc-powerpc64le-linux-gnu g++-powerpc64le-linux-gnu \
+                gcc-s390x-linux-gnu g++-s390x-linux-gnu
+              mix local.hex --force
+              mix local.rebar --force
+              mkdir -p "$ELIXIR_MAKE_CACHE_DIR"
+              mix deps.get
+              mix elixir_make.precompile
+            '
 
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload precompiled artifacts
+        uses: actions/upload-artifact@v7
         with:
-          files: |
+          name: precompiled-linux
+          path: |
             cache/expty*.tar.gz
             cache/expty*.sha256
+          if-no-files-found: error
+          retention-days: 1
 
   macos:
-    runs-on: macos-14
-    env:
-      MIX_ENV: prod
-      elixir_version: "1.16.2"
+    runs-on: macos-15-intel
     strategy:
       matrix:
-        job:
-          - { otp_version: "25.3.2.8", elixir: "1.16.2" }
+        otp_version: ["25.3.2.8"]
+        elixir_version: ["1.16.2"]
+    env:
+      MIX_ENV: prod
+      OTP_VERSION: ${{ matrix.otp_version }}
+      ELIXIR_VERSION: ${{ matrix.elixir_version }}
 
-    name: macOS - OTP ${{ matrix.job.otp_version }}
+    name: macOS - OTP ${{ matrix.otp_version }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
-      - name: Install erlang and elixir
+      - name: Install OTP
+        uses: cocoa-xu/otp-build@v1
+        with:
+          otp_version: ${{ env.OTP_VERSION }}
+
+      - name: Install Elixir
         run: |
-          export ROOT_DIR=$(pwd)
-
-          mkdir -p ./cache/otp
-          curl -fSL https://github.com/cocoa-xu/otp-build/releases/download/v${{ matrix.job.otp_version }}/otp-x86_64-apple-darwin.tar.gz -o ./cache/otp/otp-v${{ matrix.job.otp_version }}-x86_64-apple-darwin.tar.gz
-          cd ./cache/otp
-          tar -xzf otp-v${{ matrix.job.otp_version }}-x86_64-apple-darwin.tar.gz
-          cd ${ROOT_DIR}
-
-          export PATH=$(pwd)/cache/otp/usr/local/bin:$(pwd)/./cache/elixir/elixir-${{ matrix.job.elixir }}/bin:${PATH}
-          export ERL_ROOTDIR=$(pwd)/cache/otp/usr/local/lib/erlang
-
-          mkdir -p ./cache/elixir
-          curl -fSL https://github.com/elixir-lang/elixir/archive/refs/tags/v${{ matrix.job.elixir }}.tar.gz -o ./cache/elixir/elixir-${{ matrix.job.elixir }}.tar.gz
-          cd ./cache/elixir
-          tar -xzf elixir-${{ matrix.job.elixir }}.tar.gz
-          cd elixir-${{ matrix.job.elixir }}
-          make compile
-          make -j$(sysctl -n hw.ncpu) install
-
-          mix local.hex --force
-          mix local.rebar --force
+          otp_release="${OTP_VERSION%%.*}"
+          elixir_dir="$RUNNER_TEMP/elixir"
+          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          mkdir -p "$elixir_dir"
+          unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
+          echo "$elixir_dir/bin" >> "$GITHUB_PATH"
 
       - name: Precompile
         run: |
-          export PATH=$(pwd)/cache/otp/usr/local/bin:$(pwd)/./cache/elixir/elixir-${{ matrix.job.elixir }}/bin:${PATH}
-          export ERL_ROOTDIR=$(pwd)/cache/otp/usr/local/lib/erlang
-          export ELIXIR_MAKE_CACHE_DIR=$(pwd)/cache
-          mkdir -p "${ELIXIR_MAKE_CACHE_DIR}"
+          mix local.hex --force
+          mix local.rebar --force
+          export ELIXIR_MAKE_CACHE_DIR="$PWD/cache"
+          mkdir -p "$ELIXIR_MAKE_CACHE_DIR"
           mix deps.get
           mix elixir_make.precompile
 
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload precompiled artifacts
+        uses: actions/upload-artifact@v7
         with:
-          files: |
+          name: precompiled-macos
+          path: |
             cache/expty*.tar.gz
             cache/expty*.sha256
+          if-no-files-found: error
+          retention-days: 1
 
   windows:
     runs-on: windows-2022
-    env:
-      MIX_ENV: prod
     strategy:
       matrix:
-        otp_version: [25]
-    
+        include:
+          - otp_version: "25"
+            elixir_version: "1.15"
+    env:
+      MIX_ENV: prod
+      OTP_VERSION: ${{ matrix.otp_version }}
+      ELIXIR_VERSION: ${{ matrix.elixir_version }}
+
     name: Windows - OTP ${{ matrix.otp_version }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp_version }}
-          elixir-version: 1.15
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -136,14 +173,49 @@ jobs:
       - name: Precompile
         shell: bash
         run: |
-          export ELIXIR_MAKE_CACHE_DIR=$(pwd)/cache
-          mkdir -p "${ELIXIR_MAKE_CACHE_DIR}"
+          export ELIXIR_MAKE_CACHE_DIR="$PWD/cache"
+          mkdir -p "$ELIXIR_MAKE_CACHE_DIR"
           mix deps.get
           mix elixir_make.precompile
 
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload precompiled artifacts
+        uses: actions/upload-artifact@v7
         with:
-          files: |
+          name: precompiled-windows
+          path: |
             cache/expty*.tar.gz
             cache/expty*.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [linux, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Download precompiled artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify precompiled artifacts
+        run: |
+          cd release-assets
+          test "$(find . -maxdepth 1 -name 'expty*.tar.gz' | wc -l)" -eq 10
+          test "$(find . -maxdepth 1 -name 'expty*.sha256' | wc -l)" -eq 10
+          sha256sum --check expty*.sha256
+
+      - name: Publish GitHub release
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
