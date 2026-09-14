@@ -34,7 +34,7 @@ jobs:
         run: |
           otp_release="${OTP_VERSION%%.*}"
           elixir_dir="$GITHUB_WORKSPACE/.elixir"
-          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          curl -fSL --retry 3 --retry-all-errors "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
           mkdir -p "$elixir_dir"
           unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
 
@@ -116,7 +116,7 @@ jobs:
         run: |
           otp_release="${OTP_VERSION%%.*}"
           elixir_dir="$RUNNER_TEMP/elixir"
-          curl -fSL "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
+          curl -fSL --retry 3 --retry-all-errors "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${otp_release}.zip" -o "$RUNNER_TEMP/elixir.zip"
           mkdir -p "$elixir_dir"
           unzip -q "$RUNNER_TEMP/elixir.zip" -d "$elixir_dir"
           echo "$elixir_dir/bin" >> "$GITHUB_PATH"
