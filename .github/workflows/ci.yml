@@ -127,6 +127,13 @@ jobs:
           mix local.rebar --force
           mix deps.get
 
+      - name: Verify Hex package contents
+        run: |
+          MIX_ENV=prod mix elixir_make.checksum --all --ignore-unavailable
+          package_dir="$RUNNER_TEMP/expty-package"
+          mix hex.build --unpack --output "$package_dir"
+          test -f "$package_dir/cmake/FindLibX.cmake"
+
       - name: Compile
         run: mix compile
 

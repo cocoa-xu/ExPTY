@@ -58,6 +58,7 @@ defmodule ExPTY.MixProject do
       name: "expty",
       files: ~w(
         c_src
+        cmake
         3rd_party
         lib
         mix.exs
