@@ -18,8 +18,6 @@
 #include <signal.h>
 #include <spawn.h>
 
-#include <uv.h>
-
 #include <erl_nif.h>
 #include "nif_utils.h"
 
@@ -90,8 +88,7 @@ struct pty_baton {
   int exit_code;
   int signal_code;
   pid_t pid;
-  uv_async_t async;
-  uv_thread_t tid;
+  ErlNifTid tid;
 };
 
 typedef struct pty_pipesocket_ {
@@ -102,10 +99,8 @@ typedef struct pty_pipesocket_ {
   ErlNifEnv * env;
   ErlNifPid process;
 
-  uv_async_t async;
-  uv_thread_t tid;
-  uv_mutex_t mutex;
-  uv_pipe_t handle_;
+  ErlNifTid tid;
+  ErlNifMutex *mutex;
 
   static ErlNifResourceType * type;
   size_t write(void * data, size_t len);
@@ -116,13 +111,9 @@ static int pty_nonblock(int fd);
 static int pty_openpty(int *, int *, char *,
   const struct termios *,
   const struct winsize *);
-static void pty_waitpid(void *);
-static void pty_after_waitpid(uv_async_t *);
-static void pty_after_close(uv_handle_t *);
-
-static void pty_pipesocket_fn(void *data);
-static void pty_after_pipesocket(uv_async_t *);
-static void pty_after_close_pipesocket(uv_handle_t *);
+static void *pty_waitpid(void *);
+static void *pty_pipesocket_fn(void *data);
+static void pty_pipesocket_dtor(ErlNifEnv *, void *);
 
 static ERL_NIF_TERM throw_for_errno(ErlNifEnv *env, const char* message, int _errno);
 static void pty_close_fd(int *fd);
@@ -174,6 +165,9 @@ private:
 // Native threads can outlive static destructors during library teardown.
 static char processes_mutex_name[] = "ExPTY.ProcessRegistry";
 static char spawn_mutex_name[] = "ExPTY.Spawn";
+static char pipesocket_mutex_name[] = "ExPTY.PipeSocket";
+static char waitpid_thread_name[] = "ExPTY.WaitPid";
+static char pipesocket_thread_name[] = "ExPTY.PipeSocketReader";
 static process_registry *processes = nullptr;
 static ErlNifMutex *spawn_mutex = nullptr;
 
@@ -363,6 +357,9 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       erl_ret = nif::error(env, "Could not allocate memory for pipesocket resource.");
       goto done;
     }
+    pipesocket->fd = -1;
+    pipesocket->fd_closed = true;
+    pipesocket->mutex = nullptr;
 
     enif_self(env, &process);
 
@@ -420,6 +417,14 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
         goto done;
       }
 
+      pipesocket->mutex = enif_mutex_create(pipesocket_mutex_name);
+      if (pipesocket->mutex == nullptr) {
+        erl_ret = nif::error(env, "Could not create mutex for pipesocket resource.");
+        pty_kill_process_group(pid, SIGKILL);
+        pty_reap(pid);
+        goto done;
+      }
+
       pipesocket->fd = master;
       pipesocket->pid = pid;
       pipesocket->fd_closed = false;
@@ -440,16 +445,10 @@ static ERL_NIF_TERM expty_spawn(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
       baton->env = env;
       baton->process = process;
       baton->pid = pid;
-      baton->async.data = baton;
 
-      pipesocket->async.data = pipesocket;
-      uv_mutex_init(&pipesocket->mutex);
-      uv_async_init(uv_default_loop(), &pipesocket->async, pty_after_pipesocket);
-
-      uv_async_init(uv_default_loop(), &baton->async, pty_after_waitpid);
       processes->insert(pid);
-      uv_thread_create(&baton->tid, pty_waitpid, static_cast<void*>(baton));
-      uv_thread_create(&pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket));
+      enif_thread_create(waitpid_thread_name, &baton->tid, pty_waitpid, static_cast<void*>(baton), NULL);
+      enif_thread_create(pipesocket_thread_name, &pipesocket->tid, pty_pipesocket_fn, static_cast<void*>(pipesocket), NULL);
     }
 done:
     if (restore_signal_mask) {
@@ -654,7 +653,7 @@ pty_nonblock(int fd) {
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-static void
+static void *
 pty_pipesocket_fn(void *data) {
   pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(data);
 
@@ -715,7 +714,8 @@ pty_pipesocket_fn(void *data) {
     }
   }
 
-  uv_async_send(&pipesocket->async);
+  enif_release_resource((void *)pipesocket);
+  return nullptr;
 }
 
 size_t pty_pipesocket::write(void * data, size_t len) {
@@ -723,7 +723,7 @@ size_t pty_pipesocket::write(void * data, size_t len) {
     return 0;
   }
 
-  uv_mutex_lock(&this->mutex);
+  enif_mutex_lock(this->mutex);
   const char *buffer = static_cast<const char *>(data);
   size_t bytes_to_write = len, bytes_written = 0, buffer_size = 1024, nbytes = 0;
   size_t retry = 3;
@@ -764,7 +764,7 @@ size_t pty_pipesocket::write(void * data, size_t len) {
     break;
   }
 
-  uv_mutex_unlock(&this->mutex);
+  enif_mutex_unlock(this->mutex);
   return bytes_written;
 }
 
@@ -773,7 +773,7 @@ size_t pty_pipesocket::write(void * data, size_t len) {
  * Wait for SIGCHLD to read exit status.
  */
 
-static void pty_waitpid(void *data) {
+static void *pty_waitpid(void *data) {
   int ret;
   int stat_loc;
 
@@ -803,43 +803,22 @@ static void pty_waitpid(void *data) {
   ));
   enif_free_env(msg_env);
 
-  uv_async_send(&baton->async);
   processes->erase(baton->pid);
-}
-
-/**
- * pty_after_waitpid
- * Callback after exit status has been read.
- */
-
-static void
-pty_after_waitpid(uv_async_t *async) {
-  uv_close((uv_handle_t *)async, pty_after_close);
-}
-
-static void
-pty_after_pipesocket(uv_async_t *async) {
-  uv_close((uv_handle_t *)async, pty_after_close_pipesocket);
-}
-
-/**
- * pty_after_close
- * uv_close() callback - free handle data
- */
-
-static void
-pty_after_close(uv_handle_t *handle) {
-  uv_async_t *async = (uv_async_t *)handle;
-  pty_baton *baton = static_cast<pty_baton*>(async->data);
   delete baton;
+  return nullptr;
 }
 
-static void
-pty_after_close_pipesocket(uv_handle_t *handle) {
-  uv_async_t *async = (uv_async_t *)handle;
-  pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(async->data);
-  uv_mutex_destroy(&pipesocket->mutex);
-  enif_release_resource((void *)pipesocket);
+/**
+ * pty_pipesocket_dtor
+ * Runs once both the reader thread and the owning term are gone.
+ */
+
+static void pty_pipesocket_dtor(ErlNifEnv *, void *data) {
+  pty_pipesocket *pipesocket = static_cast<pty_pipesocket*>(data);
+  if (pipesocket->mutex != nullptr) {
+    enif_mutex_destroy(pipesocket->mutex);
+    pipesocket->mutex = nullptr;
+  }
 }
 
 static void pty_close_fd(int *fd) {
@@ -919,7 +898,7 @@ err:
 
 static int on_load(ErlNifEnv * env, void **, ERL_NIF_TERM) {
   ErlNifResourceType *rt;
-  rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", NULL, ERL_NIF_RT_CREATE, NULL);
+  rt = enif_open_resource_type(env, "Elixir.ExPTY.Nif", "pty_pipesocket", pty_pipesocket_dtor, ERL_NIF_RT_CREATE, NULL);
   if (!rt) return -1;
 
   ErlNifMutex *processes_mutex = enif_mutex_create(processes_mutex_name);
