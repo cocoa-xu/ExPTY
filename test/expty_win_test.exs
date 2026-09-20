@@ -61,8 +61,12 @@ defmodule ExPTY.WinTest do
   end
 
   defp os_process_alive?(pid) do
-    {out, _} = System.cmd("tasklist", ["/FI", "PID eq #{pid}", "/NH"], stderr_to_stdout: true)
-    String.contains?(out, Integer.to_string(pid))
+    {out, _} =
+      System.cmd("tasklist", ["/FI", "PID eq #{pid}", "/NH", "/FO", "CSV"],
+        stderr_to_stdout: true
+      )
+
+    String.contains?(out, "\"#{pid}\"")
   end
 
   defp refute_os_process_alive(pid, deadline \\ nil) do

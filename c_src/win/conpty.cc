@@ -54,9 +54,8 @@ struct pty_baton {
   HANDLE hWait{nullptr};
   bool write_ready{false};
   bool closed{false};
+  bool exited{false};
   ErlNifMutex *mutex{nullptr};
-  ErlNifTid write_pipe_tid;
-  ErlNifTid read_tid;
 
   static ErlNifResourceType *type;
 
@@ -470,8 +469,10 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
     auto envV = vectorFromString(env_w);
     LPWSTR envArg = envV.empty() ? nullptr : envV.data();
 
+    ErlNifTid tid;
+
     enif_keep_resource((void *)handle);
-    if (enif_thread_create(write_pipe_thread_name, &handle->write_pipe_tid, create_write_pipe, static_cast<void*>(handle), NULL) != 0) {
+    if (enif_thread_create(write_pipe_thread_name, &tid, create_write_pipe, static_cast<void*>(handle), NULL) != 0) {
       enif_release_resource((void *)handle);
       handle->close();
       return nif::error(env, "Cannot start the pty write thread");
@@ -479,7 +480,7 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
     ConnectNamedPipe(handle->hIn, nullptr);
 
     enif_keep_resource((void *)handle);
-    if (enif_thread_create(read_thread_name, &handle->read_tid, read_data, static_cast<void*>(handle), NULL) != 0) {
+    if (enif_thread_create(read_thread_name, &tid, read_data, static_cast<void*>(handle), NULL) != 0) {
       enif_release_resource((void *)handle);
       handle->close();
       return nif::error(env, "Cannot start the pty read thread");
@@ -543,11 +544,22 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
     CloseHandle(piClient.hThread);
 
     // Setup Windows wait for process exit event
+    HANDLE hWait = nullptr;
     enif_keep_resource((void *)handle);
-    if (!RegisterWaitForSingleObject(&handle->hWait, piClient.hProcess, OnProcessExitWinEvent, (PVOID)handle, INFINITE, WT_EXECUTEONLYONCE)) {
+    if (!RegisterWaitForSingleObject(&hWait, piClient.hProcess, OnProcessExitWinEvent, (PVOID)handle, INFINITE, WT_EXECUTEONLYONCE)) {
       enif_release_resource((void *)handle);
       handle->close();
       return nif::error(env, "Cannot wait for the pty process to exit");
+    }
+
+    enif_mutex_lock(handle->mutex);
+    bool exited = handle->exited;
+    if (!exited) {
+      handle->hWait = hWait;
+    }
+    enif_mutex_unlock(handle->mutex);
+    if (exited) {
+      UnregisterWaitEx(hWait, NULL);
     }
     
     // Return
@@ -641,10 +653,17 @@ VOID CALLBACK OnProcessExitWinEvent(
     _In_ BOOLEAN TimerOrWaitFired) {
   pty_baton *baton = static_cast<pty_baton*>(context);
 
+  enif_mutex_lock(baton->mutex);
+  baton->exited = true;
+  HANDLE hWait = baton->hWait;
+  baton->hWait = nullptr;
+  enif_mutex_unlock(baton->mutex);
+
   // NULL as the completion event is required: we are running inside the wait
   // callback, so asking to wait for outstanding callbacks would deadlock.
-  UnregisterWaitEx(baton->hWait, NULL);
-  baton->hWait = nullptr;
+  if (hWait != nullptr) {
+    UnregisterWaitEx(hWait, NULL);
+  }
 
   DWORD exitCode = 0;
   GetExitCodeProcess(baton->hShell, &exitCode);
