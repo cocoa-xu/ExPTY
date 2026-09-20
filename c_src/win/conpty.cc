@@ -11,7 +11,9 @@
 
 #define WIN32_LEAN_AND_MEAN
 
+#include <cstdint>
 #include <iostream>
+#include <memory>
 #include <Shlwapi.h> // PathCombine, PathIsRelative
 #include <sstream>
 #include <string>
@@ -21,8 +23,6 @@
 #include <Windows.h>
 #include <strsafe.h>
 #include "path_util.h"
-
-#include <uv.h>
 
 #include <erl_nif.h>
 #include "nif_utils.h"
@@ -53,11 +53,12 @@ struct pty_baton {
   std::wstring inName, outName;
   HANDLE hRealIn;
   bool write_ready{false};
-  uv_mutex_t mutex;
+  ErlNifMutex *mutex{nullptr};
 
   HANDLE hShell;
   HANDLE hWait;
-  uv_thread_t tid;
+  ErlNifTid write_pipe_tid;
+  ErlNifTid read_tid;
 
   pty_baton(ErlNifEnv *_env, ErlNifPid *_process, int _id, HANDLE _hIn, HANDLE _hOut, HPCON _hpc, std::wstring _inName, std::wstring _outName) : 
   env(_env), process(_process), id(_id), hIn(_hIn), hOut(_hOut), hpc(_hpc), inName(_inName), outName(_outName) {};
@@ -70,21 +71,21 @@ DWORD pty_baton::write(void * data, size_t len) {
   DWORD dwWritten;
   if (!this->write_ready) return 0;
 
-  uv_mutex_lock(&this->mutex);
+  enif_mutex_lock(this->mutex);
 
   if (!WriteFile(this->hRealIn, data, len, &dwWritten, NULL)) {
-    return 0;
+    dwWritten = 0;
   }
 
-  uv_mutex_unlock(&this->mutex);
+  enif_mutex_unlock(this->mutex);
 
   return dwWritten;
 }
 
-static void create_write_pipe(void *data) {
+static void *create_write_pipe(void *data) {
   pty_baton *baton = static_cast<pty_baton*>(data);
 
-  if (baton->write_ready) return;
+  if (baton->write_ready) return nullptr;
 
   HANDLE hPipe;
   while (true) {
@@ -106,9 +107,10 @@ static void create_write_pipe(void *data) {
 
   baton->hRealIn = hPipe;
   baton->write_ready = true;
+  return nullptr;
 }
 
-static void read_data(void *data) {
+static void *read_data(void *data) {
   pty_baton *baton = static_cast<pty_baton*>(data);
 
   DWORD dwRead;
@@ -162,10 +164,15 @@ static void read_data(void *data) {
   }
 
   CloseHandle(hPipe);
+  return nullptr;
 }
 
 static std::vector<pty_baton*> ptyHandles;
 static volatile LONG ptyCounter;
+
+static char pty_mutex_name[] = "ExPTY.ConPTY";
+static char write_pipe_thread_name[] = "ExPTY.ConPTYWritePipe";
+static char read_thread_name[] = "ExPTY.ConPTYReader";
 
 static pty_baton* get_pty_baton(int id) {
   for (size_t i = 0; i < ptyHandles.size(); ++i) {
@@ -396,10 +403,13 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
     auto envV = vectorFromString(env_w);
     LPWSTR envArg = envV.empty() ? nullptr : envV.data();
 
-    uv_mutex_init(&handle->mutex);
-    uv_thread_create(&handle->tid, create_write_pipe, static_cast<void*>(handle));
+    handle->mutex = enif_mutex_create(pty_mutex_name);
+    if (handle->mutex == nullptr) {
+      return nif::error(env, "Cannot create mutex for pty handle");
+    }
+    enif_thread_create(write_pipe_thread_name, &handle->write_pipe_tid, create_write_pipe, static_cast<void*>(handle), NULL);
     ConnectNamedPipe(handle->hIn, nullptr);
-    uv_thread_create(&handle->tid, read_data, static_cast<void*>(handle));
+    enif_thread_create(read_thread_name, &handle->read_tid, read_data, static_cast<void*>(handle), NULL);
     ConnectNamedPipe(handle->hOut, nullptr);
 
     // Attach the pseudoconsole to the client application we're creating

@@ -59,12 +59,12 @@ defmodule ExPTY.MixProject do
       files: ~w(
         c_src
         cmake
-        3rd_party
         lib
         mix.exs
         README*
         LICENSE*
         Makefile
+        Makefile.win
         CMakeLists.txt
         checksum.exs
       ),

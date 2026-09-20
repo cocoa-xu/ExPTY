@@ -1,6 +1,7 @@
 #pragma once
 
 #include <erl_nif.h>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
