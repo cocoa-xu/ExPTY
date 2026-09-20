@@ -51,7 +51,7 @@ defmodule ExPTYTest do
       if unix?() do
         {System.find_executable("true") || "/usr/bin/true", [], 0}
       else
-        {System.find_executable("cmd") || "cmd.exe", ["/c", "exit", "0"], nil}
+        {"cmd.exe", ["/c", "exit", "0"], nil}
       end
 
     assert {:ok, pty} = ExPTY.spawn(executable, args, on_exit: ExitCallback)
