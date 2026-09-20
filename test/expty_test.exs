@@ -47,12 +47,15 @@ defmodule ExPTYTest do
   end
 
   test "keeps module on_exit callback passed during spawn" do
-    if unix?() do
-      executable = System.find_executable("true") || "/usr/bin/true"
+    {executable, args, signal_code} =
+      if unix?() do
+        {System.find_executable("true") || "/usr/bin/true", [], 0}
+      else
+        {System.find_executable("cmd") || "cmd.exe", ["/c", "exit", "0"], nil}
+      end
 
-      assert {:ok, pty} = ExPTY.spawn(executable, [], on_exit: ExitCallback)
-      assert_receive {:expty_exit, ExPTY, ^pty, 0, 0}, 1_000
-    end
+    assert {:ok, pty} = ExPTY.spawn(executable, args, on_exit: ExitCallback)
+    assert_receive {:expty_exit, ExPTY, ^pty, 0, ^signal_code}, 5_000
   end
 
   defp unix? do
