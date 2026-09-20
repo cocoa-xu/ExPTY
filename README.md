@@ -96,20 +96,18 @@ Enum.each(String.split(env, "\n"), fn env_var ->
 end)
 ```
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `ExPTY` to your list of dependencies in `mix.exs`:
+The package is [available on Hex](https://hex.pm/packages/expty). Add `:expty`
+to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:expty, "~> 0.2.2"}
+    {:expty, "~> 0.2.5"}
   ]
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/expty>.
+The documentation is on [HexDocs](https://hexdocs.pm/expty).
 
 ## Acknowledgements
 
