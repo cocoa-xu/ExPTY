@@ -52,6 +52,9 @@ defmodule ExPTY.Nif do
   def resize(_arg1, _cols, _rows),
     do: :erlang.nif_error(:not_loaded)
 
+  def close(_pty),
+    do: :erlang.nif_error(:not_loaded)
+
   def kill(_arg1, _signal),
     do: :erlang.nif_error(:not_loaded)
 
