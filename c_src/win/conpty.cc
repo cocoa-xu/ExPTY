@@ -41,7 +41,6 @@ typedef void (__stdcall *PFNCLOSEPSEUDOCONSOLE)(HPCON hpc);
 VOID CALLBACK OnProcessExitWinEvent(
     _In_ PVOID context,
     _In_ BOOLEAN TimerOrWaitFired);
-static void OnProcessExit(uv_async_t *async);
 
 struct pty_baton {
   ErlNifEnv *env;
@@ -58,7 +57,6 @@ struct pty_baton {
 
   HANDLE hShell;
   HANDLE hWait;
-  uv_async_t async;
   uv_thread_t tid;
 
   pty_baton(ErlNifEnv *_env, ErlNifPid *_process, int _id, HANDLE _hIn, HANDLE _hOut, HPCON _hpc, std::wstring _inName, std::wstring _outName) : 
@@ -143,7 +141,10 @@ static void read_data(void *data) {
     // Data is available to read
     // Read data from the named pipe client instance
     dwRead = 0;
-    ReadFile(hPipe, buffer, sizeof(buffer), &dwRead, NULL);
+    if (!ReadFile(hPipe, buffer, sizeof(buffer), &dwRead, NULL)) {
+      // The pseudoconsole closed its end, i.e. the spawned process is gone.
+      break;
+    }
     if (dwRead) {
       ERL_NIF_TERM dataread;
       unsigned char * ptr;
@@ -159,6 +160,8 @@ static void read_data(void *data) {
       }
     }
   }
+
+  CloseHandle(hPipe);
 }
 
 static std::vector<pty_baton*> ptyHandles;
@@ -449,10 +452,6 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
 
     // Update handle
     handle->hShell = piClient.hProcess;
-    handle->async.data = handle;
-
-    // Setup OnProcessExit callback
-    uv_async_init(uv_default_loop(), &handle->async, OnProcessExit);
 
     // Setup Windows wait for process exit event
     RegisterWaitForSingleObject(&handle->hWait, piClient.hProcess, OnProcessExitWinEvent, (PVOID)handle, INFINITE, WT_EXECUTEONLYONCE);
@@ -537,29 +536,23 @@ VOID CALLBACK OnProcessExitWinEvent(
     _In_ BOOLEAN TimerOrWaitFired) {
   pty_baton *baton = static_cast<pty_baton*>(context);
 
-  // Fire OnProcessExit
-  uv_async_send(&baton->async);
-}
+  // NULL as the completion event is required: we are running inside the wait
+  // callback, so asking to wait for outstanding callbacks would deadlock.
+  UnregisterWaitEx(baton->hWait, NULL);
+  baton->hWait = nullptr;
 
-void OnProcessExit(uv_async_t *async) {
-  pty_baton *baton = static_cast<pty_baton*>(async->data);
-
-  UnregisterWait(baton->hWait);
-
-  // Get exit code
   DWORD exitCode = 0;
   GetExitCodeProcess(baton->hShell, &exitCode);
 
+  // Unix reports the terminating signal as the fourth argument of `on_exit`,
+  // Windows has no equivalent and reports `nil`.
   ErlNifEnv * msg_env = enif_alloc_env();
-  enif_send(NULL, baton->process, msg_env, enif_make_tuple2(msg_env,
+  enif_send(NULL, baton->process, msg_env, enif_make_tuple3(msg_env,
     nif::atom(msg_env, "exit"),
-    enif_make_int(msg_env, exitCode)
+    enif_make_int(msg_env, exitCode),
+    nif::atom(msg_env, "nil")
   ));
   enif_free_env(msg_env);
-
-  uv_mutex_destroy(&baton->mutex);
-  enif_free(baton->process);
-  baton->process = NULL;
 }
 
 // static NAN_METHOD(PtyKill) {
@@ -620,7 +613,7 @@ static ErlNifFunc nif_functions[] = {
   {"connect_win32", 4, expty_pty_connect, ERL_NIF_DIRTY_JOB_IO_BOUND},
 
   // stubs
-  {"spawn_unix", 13, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
+  {"spawn_unix", 14, expty_stub, ERL_NIF_DIRTY_JOB_IO_BOUND},
   {"pause", 1, expty_stub, ERL_DIRTY_JOB_IO_BOUND},
   {"resume", 1, expty_stub, ERL_DIRTY_JOB_IO_BOUND},
 };
