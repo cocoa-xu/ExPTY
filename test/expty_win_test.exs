@@ -51,6 +51,15 @@ defmodule ExPTY.WinTest do
     assert GenServer.stop(pty) == :ok
   end
 
+  test "set_echo reports itself unavailable instead of taking the owner down" do
+    assert {:ok, pty} = ExPTY.spawn(@shell, [])
+
+    assert {:error, _reason} = ExPTY.set_echo(pty, true)
+    assert Process.alive?(pty)
+
+    assert GenServer.stop(pty) == :ok
+  end
+
   defp os_process_alive?(pid) do
     {out, _} = System.cmd("tasklist", ["/FI", "PID eq #{pid}", "/NH"], stderr_to_stdout: true)
     String.contains?(out, Integer.to_string(pid))

@@ -657,6 +657,14 @@ defmodule ExPTY do
   end
 
   @impl true
+  def handle_call({:set_echo, echo?}, _from, %T{os_type: :win32} = state)
+      when is_boolean(echo?) do
+    # A pseudoconsole has no termios equivalent: echo belongs to the console
+    # mode of the attached client, which this side does not own.
+    {:reply, {:error, "set_echo is not available on Windows"}, state}
+  end
+
+  @impl true
   def handle_info({:data, data}, %T{on_data: on_data} = state) do
     case on_data do
       {:module, module} ->
