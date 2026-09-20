@@ -51,6 +51,40 @@ defmodule ExPTY.WinTest do
     assert GenServer.stop(pty) == :ok
   end
 
+  test "a write issued right after spawn reaches the process" do
+    owner = self()
+    ref = make_ref()
+
+    assert {:ok, pty} =
+             ExPTY.spawn(@shell, [],
+               on_exit: fn _, _, exit_code, _ -> send(owner, {ref, exit_code}) end
+             )
+
+    assert ExPTY.write(pty, "exit 7\r") == :ok
+    assert_receive {^ref, 7}, 15_000
+
+    assert GenServer.stop(pty) == :ok
+  end
+
+  test "closing while the process is alive still reports its exit status" do
+    owner = self()
+    ref = make_ref()
+
+    assert {:ok, pty} =
+             ExPTY.spawn(@shell, [],
+               on_exit: fn _, _, exit_code, signal_code ->
+                 send(owner, {ref, exit_code, signal_code})
+               end
+             )
+
+    assert ExPTY.Nif.close(:sys.get_state(pty).pty) == :ok
+
+    assert_receive {^ref, exit_code, nil}, 15_000
+    refute exit_code == 0
+
+    assert GenServer.stop(pty) == :ok
+  end
+
   test "set_echo reports itself unavailable instead of taking the owner down" do
     assert {:ok, pty} = ExPTY.spawn(@shell, [])
 
