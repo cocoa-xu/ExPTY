@@ -6,6 +6,8 @@
 
 `ExPTY` fills the gap where executables spawned by `Port` do not have a tty available to them.
 
+[![Hex.pm](https://img.shields.io/hexpm/v/expty.svg?style=flat&color=blue)](https://hex.pm/packages/expty)
+
 <table>
 <tr>
 <td> Module </td> <td> Example </td>

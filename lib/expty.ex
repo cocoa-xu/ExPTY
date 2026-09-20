@@ -510,15 +510,15 @@ defmodule ExPTY do
            on_data, on_exit}
       ) do
     case ExPTY.Nif.spawn_win32(file, cols, rows, debug, pipe_name, inherit_cursor) do
-      {pty_id, conin, conout} when is_integer(pty_id) ->
+      {pty, conin, conout} ->
         command_line = args_to_command_line(file, args)
 
-        case ExPTY.Nif.connect_win32(pty_id, command_line, cwd, env) do
+        case ExPTY.Nif.connect_win32(pty, command_line, cwd, env) do
           {:ok, inner_pid} ->
             {:reply, :ok,
              %T{
                os_type: os_type,
-               pty: pty_id,
+               pty: pty,
                conin: conin,
                conout: conout,
                inner_pid: inner_pid,
@@ -657,6 +657,12 @@ defmodule ExPTY do
   end
 
   @impl true
+  def handle_call({:set_echo, echo?}, _from, %T{os_type: :win32} = state)
+      when is_boolean(echo?) do
+    {:reply, {:error, "set_echo is not available on Windows"}, state}
+  end
+
+  @impl true
   def handle_info({:data, data}, %T{on_data: on_data} = state) do
     case on_data do
       {:module, module} ->
@@ -687,6 +693,14 @@ defmodule ExPTY do
 
     {:noreply, state}
   end
+
+  @impl true
+  def terminate(_reason, %T{os_type: :win32, pty: pty}) do
+    ExPTY.Nif.close(pty)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   @doc """
   Convert argc/argv into a Win32 command-line following the escaping convention
