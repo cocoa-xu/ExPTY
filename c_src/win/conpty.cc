@@ -85,11 +85,6 @@ bool pty_baton::is_closed() {
   return value;
 }
 
-/**
- * Release the pseudoconsole and everything attached to it. Runs at most once,
- * from whichever comes first: the spawned process exiting, an explicit close,
- * or the resource being collected.
- */
 void pty_baton::close() {
   enif_mutex_lock(this->mutex);
   if (this->closed) {
@@ -106,8 +101,7 @@ void pty_baton::close() {
     CloseHandle(hRealIn);
   }
 
-  // Closing the pseudoconsole is what makes the reader thread's blocking
-  // ReadFile fail, so it has to come before the pipes it reads from.
+  // ClosePseudoConsole drains through the pipes, so it has to come first.
   if (this->hpc != nullptr) {
     HMODULE hLibrary = (HMODULE)LoadLibraryExW(L"kernel32.dll", 0, 0);
     if (hLibrary != nullptr) {
@@ -476,8 +470,6 @@ static ERL_NIF_TERM expty_pty_connect(ErlNifEnv *env, int argc, const ERL_NIF_TE
     auto envV = vectorFromString(env_w);
     LPWSTR envArg = envV.empty() ? nullptr : envV.data();
 
-    // Each thread and the exit callback keep the resource alive for as long as
-    // they hold a pointer to it.
     enif_keep_resource((void *)handle);
     if (enif_thread_create(write_pipe_thread_name, &handle->write_pipe_tid, create_write_pipe, static_cast<void*>(handle), NULL) != 0) {
       enif_release_resource((void *)handle);
@@ -612,8 +604,6 @@ static ERL_NIF_TERM expty_resize(ErlNifEnv *env, int argc, const ERL_NIF_TERM ar
       return nif::error(env, "cannot find function ResizePseudoConsole");
     }
 
-    // Held across the call so that close() cannot free the pseudoconsole
-    // between the check and the resize.
     enif_mutex_lock(handle->mutex);
     bool closed = handle->closed;
     if (!closed) {

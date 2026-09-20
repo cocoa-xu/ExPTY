@@ -659,8 +659,6 @@ defmodule ExPTY do
   @impl true
   def handle_call({:set_echo, echo?}, _from, %T{os_type: :win32} = state)
       when is_boolean(echo?) do
-    # A pseudoconsole has no termios equivalent: echo belongs to the console
-    # mode of the attached client, which this side does not own.
     {:reply, {:error, "set_echo is not available on Windows"}, state}
   end
 
@@ -697,7 +695,7 @@ defmodule ExPTY do
   end
 
   @impl true
-  def terminate(_reason, %T{os_type: :win32, pty: pty}) when pty != nil do
+  def terminate(_reason, %T{os_type: :win32, pty: pty}) do
     ExPTY.Nif.close(pty)
     :ok
   end
