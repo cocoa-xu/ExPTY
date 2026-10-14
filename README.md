@@ -69,6 +69,22 @@ defmodule Example do
 end
 ```
 
+## Exit callback ordering
+
+On Unix, pass `drain_on_exit: true` to `ExPTY.spawn/3` when `on_exit` must run
+after the final `on_data` callback. The default remains `false`, so existing
+callers receive process exit without waiting for the PTY reader. Background
+descendants can keep the PTY open after the original process exits. Windows
+does not support this option.
+
+Tests build the native library from source. When testing unreleased native
+changes through a Git dependency, also force a source build in the consuming
+application:
+
+```elixir
+config :elixir_make, :force_build, expty: true
+```
+
 ## Installation
 
 ### Unix
