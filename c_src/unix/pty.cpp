@@ -714,6 +714,12 @@ pty_pipesocket_fn(void *data) {
     }
   }
 
+  // The reader sends this after its last data message. Process status comes
+  // from a different thread and can arrive before the final output.
+  ErlNifEnv *msg_env = enif_alloc_env();
+  enif_send(NULL, &pipesocket->process, msg_env, nif::atom(msg_env, "output_closed"));
+  enif_free_env(msg_env);
+
   enif_release_resource((void *)pipesocket);
   return nullptr;
 }

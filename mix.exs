@@ -22,6 +22,7 @@ defmodule ExPTY.MixProject do
           System.get_env("MAKE_BUILD_FLAGS", "-j#{System.schedulers_online()}")
       },
       make_precompiler: {:nif, CCPrecompiler},
+      make_force_build: Mix.env() == :test,
       make_precompiler_url: "#{@github_url}/releases/download/v#{@version}/@{artefact_filename}",
       make_precompiler_nif_versions: [versions: ["2.16"]],
       cc_precompiler: [
