@@ -73,9 +73,15 @@ end
 
 On Unix, pass `drain_on_exit: true` to `ExPTY.spawn/3` when `on_exit` must run
 after the final `on_data` callback. The default remains `false`, so existing
-callers receive process exit without waiting for the PTY reader. Background
-descendants can keep the PTY open after the original process exits. Windows
-does not support this option.
+callers receive process exit without waiting for the PTY reader: `on_data`
+may still run after `on_exit`.
+
+Draining has no timeout. Background descendants that keep the PTY open can
+delay `on_exit` indefinitely, even after the spawned process has exited. Use
+the default when you need prompt process exit notification, or arrange to
+terminate the remaining processes independently of `on_exit`. Waiting for
+output closure does not block the GenServer from handling other requests.
+Windows does not support this option.
 
 Tests build the native library from source. When testing unreleased native
 changes through a Git dependency, also force a source build in the consuming

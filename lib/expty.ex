@@ -164,6 +164,9 @@ defmodule ExPTY do
 
     Callback when the spawned process exited.
 
+    On Unix, remaining `on_data` callbacks may run after `on_exit` unless
+    `drain_on_exit: true` is set.
+
     Defaults to `nil`.
 
     When passing a function, the function should expect 4 arguments,
@@ -184,8 +187,15 @@ defmodule ExPTY do
 
     Delay `on_exit` until the PTY reader has closed and its final `on_data`
     callback has run. Defaults to `false`, which reports process exit without
-    waiting for the reader. Background descendants can keep the PTY open after
-    the original process exits. This option is not supported on Windows.
+    waiting for the reader.
+
+    There is no timeout: background descendants that keep the PTY open can
+    delay `on_exit` indefinitely after the spawned process exits. Use the
+    default when prompt exit notification is required, or arrange to terminate
+    the remaining processes independently of `on_exit`. The GenServer remains
+    responsive while waiting for output closure.
+
+    This option is not supported on Windows.
 
   - `encoding`: `String.t()`
 
