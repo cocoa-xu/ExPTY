@@ -124,7 +124,7 @@ to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:expty, "~> 0.2.5"}
+    {:expty, "~> 0.3.0"}
   ]
 end
 ```

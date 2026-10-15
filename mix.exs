@@ -1,7 +1,7 @@
 defmodule ExPTY.MixProject do
   use Mix.Project
 
-  @version "0.2.5"
+  @version "0.3.0"
   @github_url "https://github.com/cocoa-xu/expty"
 
   def project do
