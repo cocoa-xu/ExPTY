@@ -27,6 +27,9 @@ defmodule ExPTY do
     :handle_flow_control,
     :flow_control_pause,
     :flow_control_resume,
+    :drain_on_exit,
+    :output_closed,
+    :exit_status,
 
     # windows
     :conin,
@@ -57,6 +60,7 @@ defmodule ExPTY do
       cwd: Application.get_env(:expty, :cwd, Path.expand("~")),
       on_data: nil,
       on_exit: nil,
+      drain_on_exit: false,
       echo?: Application.get_env(:expty, :echo?, false),
       encoding: Application.get_env(:expty, :encoding, "utf-8"),
       handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
@@ -160,6 +164,9 @@ defmodule ExPTY do
 
     Callback when the spawned process exited.
 
+    On Unix, remaining `on_data` callbacks may run after `on_exit` unless
+    `drain_on_exit: true` is set.
+
     Defaults to `nil`.
 
     When passing a function, the function should expect 4 arguments,
@@ -176,6 +183,20 @@ defmodule ExPTY do
     The return value of this callback function is ignored.
 
   ##### Unix-specific Keyword Parameters
+  - `drain_on_exit`: `boolean()`
+
+    Delay `on_exit` until the PTY reader has closed and its final `on_data`
+    callback has run. Defaults to `false`, which reports process exit without
+    waiting for the reader.
+
+    There is no timeout: background descendants that keep the PTY open can
+    delay `on_exit` indefinitely after the spawned process exits. Use the
+    default when prompt exit notification is required, or arrange to terminate
+    the remaining processes independently of `on_exit`. The GenServer remains
+    responsive while waiting for output closure.
+
+    This option is not supported on Windows.
+
   - `encoding`: `String.t()`
 
     Defaults to `utf-8`. This keyword parameter will probably be removed in the first release.
@@ -361,6 +382,11 @@ defmodule ExPTY do
 
     on_data = normalize_callback(options[:on_data], :on_data, 3)
     on_exit = normalize_callback(options[:on_exit], :on_exit, 4)
+    drain_on_exit = Keyword.get(options, :drain_on_exit, false)
+
+    unless is_boolean(drain_on_exit) do
+      raise ArgumentError, "drain_on_exit must be a boolean"
+    end
 
     init_pack =
       case :os.type() do
@@ -422,10 +448,15 @@ defmodule ExPTY do
             flow_control_pause,
             flow_control_resume,
             on_data,
-            on_exit
+            on_exit,
+            drain_on_exit
           }
 
         {os_type = :win32, _} ->
+          if drain_on_exit do
+            raise ArgumentError, "drain_on_exit is not supported on Windows"
+          end
+
           # win
           file = file || "powershell.exe"
           debug = options[:debug] || false
@@ -459,7 +490,7 @@ defmodule ExPTY do
         state =
           {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
            is_utf8, close_fds, echo?, helper_path, handle_flow_control, flow_control_pause,
-           flow_control_resume, on_data, on_exit}
+           flow_control_resume, on_data, on_exit, drain_on_exit}
       ) do
     ret =
       ExPTY.Nif.spawn_unix(
@@ -493,6 +524,8 @@ defmodule ExPTY do
            flow_control_resume: flow_control_resume,
            on_data: on_data,
            on_exit: on_exit,
+           drain_on_exit: drain_on_exit,
+           output_closed: false,
            echo?: echo?
          }}
 
@@ -679,7 +712,32 @@ defmodule ExPTY do
   end
 
   @impl true
-  def handle_info({:exit, exit_code, signal_code}, %T{on_exit: on_exit} = state) do
+  def handle_info({:exit, code, signal}, %T{drain_on_exit: true, exit_status: nil} = state) do
+    maybe_notify_drained_exit(%{state | exit_status: {code, signal}})
+  end
+
+  def handle_info({:exit, _code, _signal}, %T{drain_on_exit: true} = state),
+    do: {:noreply, state}
+
+  def handle_info({:exit, code, signal}, state) do
+    notify_exit(state, code, signal)
+    {:noreply, state}
+  end
+
+  def handle_info(:output_closed, %T{drain_on_exit: true} = state) do
+    maybe_notify_drained_exit(%{state | output_closed: true})
+  end
+
+  def handle_info(:output_closed, state), do: {:noreply, state}
+
+  defp maybe_notify_drained_exit(%T{output_closed: true, exit_status: {code, signal}} = state) do
+    notify_exit(state, code, signal)
+    {:noreply, %{state | exit_status: :delivered}}
+  end
+
+  defp maybe_notify_drained_exit(state), do: {:noreply, state}
+
+  defp notify_exit(%T{on_exit: on_exit}, exit_code, signal_code) do
     case on_exit do
       {:module, module} ->
         module.on_exit(__MODULE__, self(), exit_code, signal_code)
@@ -690,8 +748,6 @@ defmodule ExPTY do
       _ ->
         nil
     end
-
-    {:noreply, state}
   end
 
   @impl true

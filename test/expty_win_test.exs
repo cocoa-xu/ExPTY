@@ -6,6 +6,12 @@ defmodule ExPTY.WinTest do
 
   @shell "cmd.exe"
 
+  test "rejects Unix-only output draining" do
+    assert_raise ArgumentError, "drain_on_exit is not supported on Windows", fn ->
+      ExPTY.init({@shell, [], drain_on_exit: true})
+    end
+  end
+
   test "stopping the owner closes the pseudoconsole and the spawned process" do
     assert {:ok, pty} = ExPTY.spawn(@shell, [])
     inner_pid = :sys.get_state(pty).inner_pid
