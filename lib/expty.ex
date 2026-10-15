@@ -27,6 +27,10 @@ defmodule ExPTY do
     :handle_flow_control,
     :flow_control_pause,
     :flow_control_resume,
+    :exit_drain_timeout,
+    :pending_exit,
+    :exit_drain_timer,
+    :reader_closed?,
 
     # windows
     :conin,
@@ -61,7 +65,8 @@ defmodule ExPTY do
       encoding: Application.get_env(:expty, :encoding, "utf-8"),
       handle_flow_control: Application.get_env(:expty, :handle_flow_control, false),
       flow_control_pause: Application.get_env(:expty, :flow_control_pause, "\x13"),
-      flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11")
+      flow_control_resume: Application.get_env(:expty, :flow_control_resume, "\x11"),
+      exit_drain_timeout: Application.get_env(:expty, :exit_drain_timeout, 1_000)
     ]
   end
 
@@ -160,6 +165,9 @@ defmodule ExPTY do
 
     Callback when the spawned process exited.
 
+    On Unix, `on_exit` runs after `on_data` has received all output that was available when the
+    process exited, unless another process still holds the terminal open past `exit_drain_timeout`.
+
     Defaults to `nil`.
 
     When passing a function, the function should expect 4 arguments,
@@ -207,6 +215,15 @@ defmodule ExPTY do
     Customizable to avoid conflicts with rebound XON/XOFF control codes (such as oh-my-zsh),
 
     Defaults to `\x11`, i.e, `XON`.
+
+  - `exit_drain_timeout`: `non_neg_integer()`
+
+    Milliseconds to wait, after the spawned process exits, for its remaining output before calling
+    `on_exit`. `on_exit` normally runs as soon as all output has been delivered to `on_data`. The
+    timeout applies only while another process still holds the terminal open, such as a background
+    job started by the spawned process.
+
+    Defaults to 1000.
 
   ##### Windows-specific Keyword Parameters
   - `debug`: `boolean()`
@@ -395,6 +412,12 @@ defmodule ExPTY do
 
           flow_control_resume = options[:flow_control_resume] || "\x11"
 
+          exit_drain_timeout = options[:exit_drain_timeout]
+
+          unless is_integer(exit_drain_timeout) and exit_drain_timeout >= 0 do
+            raise "value of `exit_drain_timeout` should be a non-negative integer"
+          end
+
           flow_control_resume =
             if is_binary(flow_control_resume) do
               flow_control_resume
@@ -421,6 +444,7 @@ defmodule ExPTY do
             handle_flow_control,
             flow_control_pause,
             flow_control_resume,
+            exit_drain_timeout,
             on_data,
             on_exit
           }
@@ -459,7 +483,7 @@ defmodule ExPTY do
         state =
           {os_type = :unix, file, args, env, cwd, cols, rows, ibaudrate, obaudrate, uid, gid,
            is_utf8, close_fds, echo?, helper_path, handle_flow_control, flow_control_pause,
-           flow_control_resume, on_data, on_exit}
+           flow_control_resume, exit_drain_timeout, on_data, on_exit}
       ) do
     ret =
       ExPTY.Nif.spawn_unix(
@@ -491,6 +515,8 @@ defmodule ExPTY do
            handle_flow_control: handle_flow_control,
            flow_control_pause: flow_control_pause,
            flow_control_resume: flow_control_resume,
+           exit_drain_timeout: exit_drain_timeout,
+           reader_closed?: false,
            on_data: on_data,
            on_exit: on_exit,
            echo?: echo?
@@ -678,8 +704,42 @@ defmodule ExPTY do
     {:noreply, state}
   end
 
+  # The exit status and the output come from different native threads, so the
+  # exit status can arrive first. Hold it until the reader reports `:closed`,
+  # which follows its last `:data` message, or until the drain timeout passes
+  # because a descendant still holds the terminal open.
   @impl true
-  def handle_info({:exit, exit_code, signal_code}, %T{on_exit: on_exit} = state) do
+  def handle_info(
+        {:exit, exit_code, signal_code},
+        %T{os_type: :unix, reader_closed?: false} = state
+      ) do
+    timer = Process.send_after(self(), :exit_drain_timeout, state.exit_drain_timeout)
+    {:noreply, %T{state | pending_exit: {exit_code, signal_code}, exit_drain_timer: timer}}
+  end
+
+  def handle_info({:exit, exit_code, signal_code}, state) do
+    notify_exit(state, exit_code, signal_code)
+    {:noreply, state}
+  end
+
+  def handle_info(:closed, %T{pending_exit: nil} = state) do
+    {:noreply, %T{state | reader_closed?: true}}
+  end
+
+  def handle_info(:closed, %T{pending_exit: {exit_code, signal_code}} = state) do
+    Process.cancel_timer(state.exit_drain_timer)
+    notify_exit(state, exit_code, signal_code)
+    {:noreply, %T{state | reader_closed?: true, pending_exit: nil, exit_drain_timer: nil}}
+  end
+
+  def handle_info(:exit_drain_timeout, %T{pending_exit: {exit_code, signal_code}} = state) do
+    notify_exit(state, exit_code, signal_code)
+    {:noreply, %T{state | pending_exit: nil, exit_drain_timer: nil}}
+  end
+
+  def handle_info(:exit_drain_timeout, state), do: {:noreply, state}
+
+  defp notify_exit(%T{on_exit: on_exit}, exit_code, signal_code) do
     case on_exit do
       {:module, module} ->
         module.on_exit(__MODULE__, self(), exit_code, signal_code)
@@ -690,8 +750,6 @@ defmodule ExPTY do
       _ ->
         nil
     end
-
-    {:noreply, state}
   end
 
   @impl true

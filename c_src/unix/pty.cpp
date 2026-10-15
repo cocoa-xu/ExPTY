@@ -714,6 +714,13 @@ pty_pipesocket_fn(void *data) {
     }
   }
 
+  // The process exit status arrives from the waitpid thread, so it can overtake
+  // output still queued in this thread. Messages from this thread keep their
+  // order, so `closed` tells the owner that every `data` message is delivered.
+  ErlNifEnv * msg_env = enif_alloc_env();
+  enif_send(NULL, &pipesocket->process, msg_env, nif::atom(msg_env, "closed"));
+  enif_free_env(msg_env);
+
   enif_release_resource((void *)pipesocket);
   return nullptr;
 }
